@@ -1,0 +1,33 @@
+import AppKit
+import Foundation
+
+protocol SelectionCapturing: Sendable {
+    func captureSelection(near point: CGPoint) async throws -> CapturedSelection
+}
+
+protocol SelectionCaptureStrategy: Sendable {
+    var method: CaptureMethod { get }
+    func captureSelection(near point: CGPoint) async throws -> CapturedSelection
+}
+
+protocol Translating: Sendable {
+    func translate(_ request: TranslationRequest) async throws -> TranslationResult
+    func testConnection() async throws
+}
+
+protocol TranslationProviderAdapting: Sendable {
+    var kind: TranslationProviderKind { get }
+    func translate(_ request: TranslationRequest, configuration: ProviderConfiguration) async throws -> TranslationResult
+}
+
+protocol OCRRecognizing: Sendable {
+    func recognizeText(near point: CGPoint) async throws -> String
+}
+
+@MainActor
+protocol PopupPresenting: AnyObject {
+    func presentLoading(for selection: CapturedSelection)
+    func presentResult(selection: CapturedSelection, result: TranslationResult)
+    func presentError(message: String, originalText: String?, method: CaptureMethod?, anchor: CGPoint)
+    func dismiss()
+}

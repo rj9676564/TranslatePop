@@ -13,9 +13,16 @@ final class PopupViewModel: ObservableObject {
 @MainActor
 final class PopupPresenter: NSObject, PopupPresenting {
     private let logger = Logger(subsystem: "top.mrlb.TranslatePop", category: "Popup")
-    private let panelWidth: CGFloat = 520
-    private let minPanelHeight: CGFloat = 280
-    private let maxPanelHeight: CGFloat = 620
+    private var panelWidth: CGFloat {
+        guard let text = currentOriginalText, !text.isEmpty else { return 420 }
+        if text.count < 30 { return 340 }
+        if text.count < 100 { return 440 }
+        return 520
+    }
+    private var panelHeight: CGFloat {
+        let screenHeight = NSScreen.main?.visibleFrame.height ?? 800
+        return screenHeight - 80
+    }
     private let viewModel = PopupViewModel()
     private var panel: NSPanel?
     private var dismissTask: Task<Void, Never>?
@@ -24,6 +31,7 @@ final class PopupPresenter: NSObject, PopupPresenting {
 
     func presentPending(at anchor: CGPoint) {
         logger.info("展示预加载弹窗")
+        activeTopOrigin = nil
         viewModel.state = .pending
         showPanel(anchor: anchor)
         scheduleDismiss(after: 8)
@@ -34,6 +42,14 @@ final class PopupPresenter: NSObject, PopupPresenting {
         viewModel.state = .loading(originalText: selection.text, method: selection.method)
         showPanel(anchor: selection.anchorPoint)
         scheduleDismiss(after: 8)
+    }
+
+    func presentStreaming(selection: CapturedSelection, partialText: String, providerName: String) {
+        logger.info("展示流式翻译，provider=\(providerName, privacy: .public)")
+        viewModel.state = .streaming(selection: selection, partialText: partialText, providerName: providerName)
+        showPanel(anchor: selection.anchorPoint)
+        dismissTask?.cancel()
+        dismissTask = nil
     }
 
     func presentResult(selection: CapturedSelection, result: TranslationResult) {
@@ -60,29 +76,46 @@ final class PopupPresenter: NSObject, PopupPresenting {
         panel?.orderOut(nil)
     }
 
+    func dismissForUserInteraction(at point: CGPoint) {
+        guard let panel, panel.isVisible else { return }
+        switch viewModel.state {
+        case .pending, .loading, .streaming:
+            logger.info("用户交互到来，但当前弹窗仍在处理中，保持显示")
+            return
+        case .idle, .result, .error:
+            break
+        }
+        if !panel.ignoresMouseEvents, panel.frame.contains(point) {
+            logger.info("点击发生在弹窗内部，保持显示")
+            return
+        }
+        dismiss()
+    }
+
     private func showPanel(anchor: CGPoint) {
         let panel = self.panel ?? makePanel()
-        let visibleFrame = NSScreen.screens.first(where: { $0.frame.contains(anchor) })?.visibleFrame
-            ?? NSScreen.main?.visibleFrame
+        let visibleFrame = NSScreen.main?.visibleFrame
             ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
-        let layout = preferredPanelLayout()
-        logger.info("size \(layout.height)");
+        let topOrigin = resolvedTopOrigin(
+            for: panel,
+            anchor: anchor,
+            visibleFrame: visibleFrame
+        )
+        let layout = preferredPanelLayout(topOriginY: topOrigin.y, visibleFrame: visibleFrame)
+        logger.info("size \(layout.height)")
         let preserveVisibleFrame = shouldPreserveVisibleFrame(for: panel, anchor: anchor)
-        viewModel.allowsScrolling = preserveVisibleFrame ? true : layout.allowsScrolling
+        viewModel.allowsScrolling = layout.allowsScrolling
         let panelFrame: CGRect
         if preserveVisibleFrame {
-            let currentFrame = panel.frame
-            let topY = currentFrame.maxY
             panelFrame = CGRect(
-                x: currentFrame.origin.x,
-                y: topY - layout.height,
+                x: topOrigin.x,
+                y: topOrigin.y - layout.height,
                 width: panelWidth,
                 height: layout.height
             )
         } else {
             panelFrame = preferredFrame(
-                for: panel,
-                anchor: anchor,
+                topOrigin: topOrigin,
                 visibleFrame: visibleFrame,
                 height: layout.height
             )
@@ -91,10 +124,13 @@ final class PopupPresenter: NSObject, PopupPresenting {
         if shouldIgnoreMouseEvents {
             viewModel.isHovering = false
         }
-        panel.setFrame(panelFrame, display: true)
-        panel.orderFrontRegardless()
+        let clampedPanelFrame = clampedFrame(panelFrame, visibleFrame: visibleFrame)
+        panel.setFrame(clampedPanelFrame, display: true)
+        if !panel.isVisible {
+            panel.orderFrontRegardless()
+        }
         activeAnchor = anchor
-        logger.info("弹窗已显示，x=\(panelFrame.origin.x, format: .fixed(precision: 0)) y=\(panelFrame.origin.y, format: .fixed(precision: 0))")
+        logger.info("弹窗已显示，x=\(clampedPanelFrame.origin.x, format: .fixed(precision: 0)) y=\(clampedPanelFrame.origin.y, format: .fixed(precision: 0))")
     }
 
     private func makePanel() -> NSPanel {
@@ -104,7 +140,7 @@ final class PopupPresenter: NSObject, PopupPresenting {
             self?.dismiss()
         }
         let panel = NSPanel(
-            contentRect: CGRect(origin: .zero, size: CGSize(width: panelWidth, height: minPanelHeight)),
+            contentRect: CGRect(origin: .zero, size: CGSize(width: panelWidth, height: panelHeight)),
             styleMask: [.nonactivatingPanel, .borderless],
             backing: .buffered,
             defer: true
@@ -145,12 +181,16 @@ final class PopupPresenter: NSObject, PopupPresenting {
         switch viewModel.state {
         case .error:
             return false
-        case .idle, .pending, .loading, .result:
+        case .streaming:
+            return !viewModel.allowsScrolling
+        case .result:
+            return !viewModel.allowsScrolling
+        case .idle, .pending, .loading:
             return true
         }
     }
 
-    private func preferredPanelLayout() -> (height: CGFloat, allowsScrolling: Bool) {
+    private func preferredPanelLayout(topOriginY: CGFloat, visibleFrame: CGRect) -> (height: CGFloat, allowsScrolling: Bool) {
         let contentWidth = panelWidth - 32
         let textWidth = contentWidth - 4
         var totalHeight: CGFloat = 32
@@ -161,7 +201,8 @@ final class PopupPresenter: NSObject, PopupPresenting {
             totalHeight += measuredHeight(
                 for: formatted(originalText),
                 width: textWidth,
-                font: .systemFont(ofSize: 17, weight: .regular)
+                font: .systemFont(ofSize: 13, weight: .regular),
+                lineSpacing: 3
             )
             totalHeight += 12
         }
@@ -173,25 +214,36 @@ final class PopupPresenter: NSObject, PopupPresenting {
             totalHeight += 24
         case .loading:
             totalHeight += 24
+        case .streaming(_, let partialText, _):
+            totalHeight += 22
+            totalHeight += measuredHeight(
+                for: formatted(partialText),
+                width: textWidth,
+                font: .systemFont(ofSize: 15, weight: .semibold),
+                lineSpacing: 4
+            )
+            totalHeight += 26
         case .result(_, let result):
             totalHeight += 22
             totalHeight += measuredHeight(
                 for: formatted(result.translatedText),
                 width: textWidth,
-                font: .systemFont(ofSize: 26, weight: .semibold)
+                font: .systemFont(ofSize: 15, weight: .semibold),
+                lineSpacing: 4
             )
             totalHeight += 26
         case .error(let message, _, _):
             totalHeight += measuredHeight(
                 for: formatted(message),
                 width: textWidth,
-                font: .systemFont(ofSize: 17, weight: .regular)
+                font: .systemFont(ofSize: 13, weight: .regular),
+                lineSpacing: 3
             )
         }
 
         totalHeight += 24
-        let clampedHeight = min(max(totalHeight, minPanelHeight), maxPanelHeight)
-        return (clampedHeight, totalHeight == maxPanelHeight)
+        let finalHeight = min(totalHeight, panelHeight)
+        return (finalHeight, totalHeight > panelHeight)
     }
 
     private func shouldPreserveVisibleFrame(for panel: NSPanel, anchor: CGPoint) -> Bool {
@@ -202,7 +254,7 @@ final class PopupPresenter: NSObject, PopupPresenting {
         }
 
         switch viewModel.state {
-        case .loading, .result:
+        case .loading, .streaming, .result:
             break
         case .idle, .pending, .error:
             return false
@@ -212,16 +264,10 @@ final class PopupPresenter: NSObject, PopupPresenting {
     }
 
     private func preferredFrame(
-        for panel: NSPanel,
-        anchor: CGPoint,
+        topOrigin: CGPoint,
         visibleFrame: CGRect,
         height: CGFloat
     ) -> CGRect {
-        let topOrigin = resolvedTopOrigin(
-            for: panel,
-            anchor: anchor,
-            visibleFrame: visibleFrame
-        )
         let clampedOriginY = max(
             visibleFrame.minY + 12,
             topOrigin.y - height
@@ -229,26 +275,39 @@ final class PopupPresenter: NSObject, PopupPresenting {
         return CGRect(x: topOrigin.x, y: clampedOriginY, width: panelWidth, height: height)
     }
 
+    private func clampedFrame(_ frame: CGRect, visibleFrame: CGRect) -> CGRect {
+        let horizontalMargin: CGFloat = 12
+        let verticalMargin: CGFloat = 12
+        let width = min(frame.width, visibleFrame.width - horizontalMargin * 2)
+        let height = min(frame.height, visibleFrame.height - verticalMargin * 2)
+        let x = min(
+            max(frame.origin.x, visibleFrame.minX + horizontalMargin),
+            visibleFrame.maxX - width - horizontalMargin
+        )
+        let y = min(
+            max(frame.origin.y, visibleFrame.minY + verticalMargin),
+            visibleFrame.maxY - height - verticalMargin
+        )
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+
     private func resolvedTopOrigin(
         for panel: NSPanel,
         anchor: CGPoint,
         visibleFrame: CGRect
     ) -> CGPoint {
-        if panel.isVisible,
-           let activeAnchor,
-           let activeTopOrigin,
-           hypot(anchor.x - activeAnchor.x, anchor.y - activeAnchor.y) < 80 {
+        if let activeTopOrigin {
             return activeTopOrigin
         }
-
+        
         let margin: CGFloat = 12
         let x = min(
             max(visibleFrame.midX - panelWidth / 2, visibleFrame.minX + margin),
             visibleFrame.maxX - panelWidth - margin
         )
-        let preferredTopY = visibleFrame.midY + 80
+        let preferredTopY = visibleFrame.maxY - 36
         let topY = min(
-            max(preferredTopY, visibleFrame.minY + minPanelHeight + margin),
+            max(preferredTopY, visibleFrame.minY + panelHeight + margin),
             visibleFrame.maxY - margin
         )
         let point = CGPoint(x: x, y: topY)
@@ -256,11 +315,11 @@ final class PopupPresenter: NSObject, PopupPresenting {
         return point
     }
 
-    private func measuredHeight(for text: String, width: CGFloat, font: NSFont) -> CGFloat {
+    private func measuredHeight(for text: String, width: CGFloat, font: NSFont, lineSpacing: CGFloat) -> CGFloat {
         guard !text.isEmpty else { return 0 }
         let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.lineBreakMode = .byWordWrapping
-        paragraphStyle.lineSpacing = font.pointSize >= 24 ? 4 : 3
+        paragraphStyle.lineBreakMode = .byCharWrapping
+        paragraphStyle.lineSpacing = lineSpacing
 
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
@@ -280,6 +339,8 @@ final class PopupPresenter: NSObject, PopupPresenting {
             return nil
         case .loading(let text, _):
             return text
+        case .streaming(let selection, _, _):
+            return selection.text
         case .result(let selection, _):
             return selection.text
         case .error(_, let text, _):
@@ -287,14 +348,6 @@ final class PopupPresenter: NSObject, PopupPresenting {
         case .idle:
             return nil
         }
-    }
-
-    private func formatted(_ text: String) -> String {
-        text
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
-            .replacingOccurrences(of: "\n{3,}", with: "\n\n", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
@@ -304,6 +357,17 @@ private struct PopupCardView: View {
     let onClose: () -> Void
 
     var body: some View {
+        VStack(spacing: 0) {
+            contentCard
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onHover { hovering in
+            onHoverChanged(hovering)
+        }
+    }
+
+    private var contentCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text(title)
@@ -341,9 +405,6 @@ private struct PopupCardView: View {
                         .stroke(Color.white.opacity(0.18), lineWidth: 1)
                 )
         )
-        .onHover { hovering in
-            onHoverChanged(hovering)
-        }
     }
 
     @ViewBuilder
@@ -362,9 +423,7 @@ private struct PopupCardView: View {
                     Text("原文")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text(formatted(originalText))
-                        .font(.body)
-                        .lineSpacing(3)
+                    Text(attributedText(for: formatted(originalText), font: .systemFont(ofSize: 13, weight: .regular), lineSpacing: 3))
                         .multilineTextAlignment(.leading)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
@@ -386,14 +445,30 @@ private struct PopupCardView: View {
                     Text("正在翻译...")
                         .foregroundStyle(.secondary)
                 }
+            case .streaming(_, let partialText, let providerName):
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                        Text("正在翻译...")
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("翻译")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(attributedText(for: formatted(partialText), font: .systemFont(ofSize: 15, weight: .semibold), lineSpacing: 4))
+                        .multilineTextAlignment(.leading)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("来源：\(sourceLabel) · 接口：\(providerName)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             case .result(_, let result):
                 VStack(alignment: .leading, spacing: 6) {
                     Text("翻译")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text(formatted(result.translatedText))
-                        .font(.title3.weight(.semibold))
-                        .lineSpacing(4)
+                    Text(attributedText(for: formatted(result.translatedText), font: .systemFont(ofSize: 15, weight: .semibold), lineSpacing: 4))
                         .multilineTextAlignment(.leading)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
@@ -402,22 +477,13 @@ private struct PopupCardView: View {
                         .foregroundStyle(.secondary)
                 }
             case .error(let message, _, _):
-                Text(formatted(message))
+                Text(attributedText(for: formatted(message), font: .systemFont(ofSize: 13, weight: .regular), lineSpacing: 3))
                     .foregroundStyle(.red)
-                    .lineSpacing(3)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func formatted(_ text: String) -> String {
-        text
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
-            .replacingOccurrences(of: "\n{3,}", with: "\n\n", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var scrollResetKey: String {
@@ -428,6 +494,8 @@ private struct PopupCardView: View {
             return "idle"
         case .loading(let text, let method):
             return "loading-\(method.rawValue)-\(text)"
+        case .streaming(let selection, let partialText, let providerName):
+            return "streaming-\(selection.method.rawValue)-\(providerName)-\(partialText)"
         case .result(let selection, let result):
             return "result-\(selection.text)-\(result.translatedText)"
         case .error(let message, let text, let method):
@@ -441,6 +509,8 @@ private struct PopupCardView: View {
             return "正在取词"
         case .loading(_, let method):
             return "取词中 · \(method.rawValue)"
+        case .streaming(let selection, _, _):
+            return "翻译中 · \(selection.method.rawValue)"
         case .result(let selection, _):
             return "翻译完成 · \(selection.method.rawValue)"
         case .error:
@@ -456,6 +526,8 @@ private struct PopupCardView: View {
             return nil
         case .loading(let text, _):
             return text
+        case .streaming(let selection, _, _):
+            return selection.text
         case .result(let selection, _):
             return selection.text
         case .error(_, let text, _):
@@ -471,6 +543,8 @@ private struct PopupCardView: View {
             return "处理中"
         case .loading(_, let method):
             return method.rawValue
+        case .streaming(let selection, _, _):
+            return selection.method.rawValue
         case .result(let selection, _):
             return selection.method.rawValue
         case .error(_, _, let method):
@@ -479,4 +553,35 @@ private struct PopupCardView: View {
             return "未知"
         }
     }
+}
+
+fileprivate func formatted(_ text: String) -> String {
+    // 先统一平台换行符
+    let normalized = text
+        .replacingOccurrences(of: "\r\n", with: "\n")
+        .replacingOccurrences(of: "\r", with: "\n")
+    
+    // 使用正则：如果单个换行符前后都不是换行符，就把它替换成空格
+    guard let regex = try? NSRegularExpression(pattern: "(?<!\n)\n(?!\n)", options: []) else { return normalized }
+    
+    let range = NSRange(normalized.startIndex..., in: normalized)
+    let singleLineBreakReplaced = regex.stringByReplacingMatches(in: normalized, options: [], range: range, withTemplate: " ")
+    
+    return singleLineBreakReplaced
+        .replacingOccurrences(of: "\n{3,}", with: "\n\n", options: .regularExpression)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+fileprivate func attributedText(for string: String, font: NSFont, lineSpacing: CGFloat) -> AttributedString {
+    let style = NSMutableParagraphStyle()
+    style.lineBreakMode = .byCharWrapping
+    style.lineSpacing = lineSpacing
+    let nsAttrString = NSAttributedString(
+        string: string,
+        attributes: [
+            .paragraphStyle: style,
+            .font: font
+        ]
+    )
+    return AttributedString(nsAttrString)
 }

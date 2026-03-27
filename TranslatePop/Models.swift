@@ -28,6 +28,11 @@ struct TranslationResult: Equatable, Sendable {
     let providerName: String
 }
 
+struct TranslationStreamUpdate: Equatable, Sendable {
+    let text: String
+    let providerName: String
+}
+
 struct ProviderConfiguration: Equatable, Codable, Sendable {
     var providerName: String = "OpenAI Compatible"
     var providerKind: TranslationProviderKind = .openAICompatible
@@ -143,6 +148,7 @@ enum PopupContentState: Equatable, Sendable {
     case idle
     case pending
     case loading(originalText: String, method: CaptureMethod)
+    case streaming(selection: CapturedSelection, partialText: String, providerName: String)
     case result(CapturedSelection, TranslationResult)
     case error(message: String, originalText: String?, method: CaptureMethod?)
 }

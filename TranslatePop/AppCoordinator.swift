@@ -24,6 +24,7 @@ final class AppCoordinator: ObservableObject {
     private var popupPresenter: PopupPresenter
     private var statusBarController: StatusBarController?
     private var triggerDecisionEngine = TriggerDecisionEngine()
+    private var activeTranslationTask: Task<Void, Never>?
     private var globalMouseDownMonitor: Any?
     private var globalSecondaryMouseDownMonitor: Any?
     private var globalMouseDraggedMonitor: Any?
@@ -113,7 +114,9 @@ final class AppCoordinator: ObservableObject {
     }
 
     func triggerManualOCR() {
-        Task { @MainActor [weak self] in
+        activeTranslationTask?.cancel()
+        activeTranslationTask = Task { @MainActor [weak self] in
+            guard !Task.isCancelled else { return }
             await self?.handleManualOCR()
         }
     }
@@ -123,7 +126,7 @@ final class AppCoordinator: ObservableObject {
 
         globalMouseDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
             guard let self, self.isMonitoring else { return }
-            self.popupPresenter.dismiss()
+            self.popupPresenter.dismissForUserInteraction(at: NSEvent.mouseLocation)
             self.isLeftMouseDragging = false
             if event.clickCount >= 2 {
                 self.scheduleTrigger(.doubleClick, location: NSEvent.mouseLocation)
@@ -132,7 +135,7 @@ final class AppCoordinator: ObservableObject {
 
         globalSecondaryMouseDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.rightMouseDown, .otherMouseDown]) { [weak self] _ in
             guard let self, self.isMonitoring else { return }
-            self.popupPresenter.dismiss()
+            self.popupPresenter.dismissForUserInteraction(at: NSEvent.mouseLocation)
         }
 
         globalMouseDraggedMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDragged]) { [weak self] _ in
@@ -150,10 +153,15 @@ final class AppCoordinator: ObservableObject {
 
     private func scheduleTrigger(_ kind: SelectionTriggerKind, location: CGPoint) {
         DebugLogger.app.info("收到触发事件：kind=\(String(describing: kind), privacy: .public)")
-        Task { @MainActor [weak self] in
+        activeTranslationTask?.cancel()
+        activeTranslationTask = Task { @MainActor [weak self] in
             let delay: Duration = kind == .doubleClick ? .milliseconds(160) : .milliseconds(220)
-            try? await Task.sleep(for: delay)
-            await self?.handleTrigger(kind, location: location)
+            do {
+                try await Task.sleep(for: delay)
+                await self?.handleTrigger(kind, location: location)
+            } catch {
+                return
+            }
         }
     }
 
@@ -187,11 +195,13 @@ final class AppCoordinator: ObservableObject {
             DebugLogger.app.info("捕获文本成功：method=\(normalizedSelection.method.rawValue, privacy: .public) text=\(limitedText, privacy: .public)")
 
             do {
-                let result = try await makeTranslationService().translate(.init(text: limitedText))
+                let result = try await consumeTranslationStream(for: normalizedSelection)
+                guard !Task.isCancelled else { return }
                 popupPresenter.presentResult(selection: normalizedSelection, result: result)
                 latestStatus = "翻译完成"
                 DebugLogger.app.info("翻译成功")
             } catch {
+                guard !Task.isCancelled else { return }
                 popupPresenter.presentError(
                     message: error.localizedDescription,
                     originalText: limitedText,
@@ -202,6 +212,7 @@ final class AppCoordinator: ObservableObject {
                 DebugLogger.app.error("翻译失败：\(error.localizedDescription, privacy: .public)")
             }
         } catch {
+            guard !Task.isCancelled else { return }
             if shouldSuppressAutomaticPopup(for: error) {
                 popupPresenter.dismiss()
                 latestStatus = "等待取词"
@@ -245,11 +256,13 @@ final class AppCoordinator: ObservableObject {
             DebugLogger.app.info("手动 OCR 成功：text=\(limitedText, privacy: .public)")
 
             do {
-                let result = try await makeTranslationService().translate(.init(text: limitedText))
+                let result = try await consumeTranslationStream(for: normalizedSelection)
+                guard !Task.isCancelled else { return }
                 popupPresenter.presentResult(selection: normalizedSelection, result: result)
                 latestStatus = "翻译完成"
                 DebugLogger.app.info("手动 OCR 翻译成功")
             } catch {
+                guard !Task.isCancelled else { return }
                 popupPresenter.presentError(
                     message: error.localizedDescription,
                     originalText: limitedText,
@@ -260,6 +273,7 @@ final class AppCoordinator: ObservableObject {
                 DebugLogger.app.error("手动 OCR 翻译失败：\(error.localizedDescription, privacy: .public)")
             }
         } catch {
+            guard !Task.isCancelled else { return }
             popupPresenter.presentError(
                 message: error.localizedDescription,
                 originalText: nil,
@@ -282,6 +296,34 @@ final class AppCoordinator: ObservableObject {
 
     private func makeTranslationService() -> Translating {
         TranslationService(configuration: settingsStore.providerConfiguration)
+    }
+
+    private func consumeTranslationStream(for selection: CapturedSelection) async throws -> TranslationResult {
+        let service = makeTranslationService()
+        var latestPartialText = ""
+        var providerName = settingsStore.providerConfiguration.providerName
+
+        for try await update in service.translateStream(.init(text: selection.text)) {
+            latestPartialText = update.text
+            providerName = update.providerName
+            popupPresenter.presentStreaming(
+                selection: selection,
+                partialText: update.text,
+                providerName: update.providerName
+            )
+        }
+
+        let finalText = latestPartialText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !finalText.isEmpty else {
+            throw TranslationFailure.emptyTranslation
+        }
+
+        return TranslationResult(
+            originalText: selection.text,
+            translatedText: finalText,
+            detectedSourceLanguage: nil,
+            providerName: providerName
+        )
     }
 
     private func shouldSuppressAutomaticPopup(for error: Error) -> Bool {

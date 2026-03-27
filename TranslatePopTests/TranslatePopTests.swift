@@ -22,10 +22,14 @@ struct TranslatePopTests {
         let comma = engine.shouldAccept(text: "，", now: Date(timeIntervalSince1970: 20))
         let punctuation = engine.shouldAccept(text: "...", now: Date(timeIntervalSince1970: 21))
         let chinese = engine.shouldAccept(text: "你好", now: Date(timeIntervalSince1970: 22))
+        let english = engine.shouldAccept(text: "hello", now: Date(timeIntervalSince1970: 23))
+        let mixed = engine.shouldAccept(text: "OpenAI 中文", now: Date(timeIntervalSince1970: 24))
 
         #expect(!comma)
         #expect(!punctuation)
-        #expect(chinese)
+        #expect(!chinese)
+        #expect(english)
+        #expect(mixed)
     }
 
     @Test
@@ -101,8 +105,8 @@ struct TranslatePopTests {
             visibleFrame: CGRect(x: 0, y: 0, width: 1200, height: 900)
         )
 
-        #expect(abs(frame.minX - anchor.x) >= 28 || abs(frame.maxX - anchor.x) >= 28)
-        #expect(abs(frame.minY - anchor.y) >= 24 || abs(frame.maxY - anchor.y) >= 24)
+        #expect(abs(frame.minX - anchor.x) >= 52 || abs(frame.maxX - anchor.x) >= 52)
+        #expect(abs(frame.minY - anchor.y) >= 40 || abs(frame.maxY - anchor.y) >= 40)
     }
 
     @Test

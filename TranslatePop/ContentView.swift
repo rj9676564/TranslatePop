@@ -97,6 +97,19 @@ struct SettingsRootView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("触发规则") {
+                HStack {
+                    Text("最低英语比例")
+                    Slider(value: englishRatioBinding, in: 0.1...0.9, step: 0.05)
+                    Text("\(Int(coordinator.settingsStore.minimumEnglishRatio * 100))%")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 48)
+                }
+                Text("只有当选中文本中的英文字母占比达到这个阈值时，才会弹出翻译窗口。默认 35%。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("调试") {
                 Button(isTesting ? "测试中..." : "测试翻译接口连通性") {
                     isTesting = true
@@ -133,6 +146,13 @@ struct SettingsRootView: View {
         Binding(
             get: { coordinator.settingsStore.providerConfiguration.timeoutSeconds },
             set: { coordinator.settingsStore.providerConfiguration.timeoutSeconds = $0 }
+        )
+    }
+
+    private var englishRatioBinding: Binding<Double> {
+        Binding(
+            get: { coordinator.settingsStore.minimumEnglishRatio },
+            set: { coordinator.settingsStore.minimumEnglishRatio = $0 }
         )
     }
 

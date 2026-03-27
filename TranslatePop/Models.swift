@@ -200,6 +200,7 @@ enum SelectionTriggerKind: Sendable {
 struct TriggerDecisionEngine {
     var duplicateInterval: TimeInterval = 1.2
     var maxTextLength = 800
+    var minimumEnglishRatio = 0.35
 
     private(set) var lastAcceptedText = ""
     private(set) var lastAcceptedAt = Date.distantPast
@@ -212,6 +213,7 @@ struct TriggerDecisionEngine {
         guard !normalized.isEmpty else { return false }
         guard normalized.count <= maxTextLength else { return false }
         guard normalized.containsMeaningfulContent else { return false }
+        guard normalized.englishLetterRatio >= minimumEnglishRatio else { return false }
 
         if normalized == lastAcceptedText && now.timeIntervalSince(lastAcceptedAt) < duplicateInterval {
             return false
@@ -231,6 +233,24 @@ private extension String {
             scalar.properties.isEmoji
         }
     }
+
+    var englishLetterRatio: Double {
+        let letterScalars = unicodeScalars.filter { scalar in
+            CharacterSet.letters.contains(scalar)
+        }
+
+        guard !letterScalars.isEmpty else {
+            return 0
+        }
+
+        let englishCount = letterScalars.reduce(into: 0) { count, scalar in
+            if ("A"..."Z").contains(String(scalar)) || ("a"..."z").contains(String(scalar)) {
+                count += 1
+            }
+        }
+
+        return Double(englishCount) / Double(letterScalars.count)
+    }
 }
 
 struct PopupPositioner {
@@ -240,8 +260,8 @@ struct PopupPositioner {
         visibleFrame: CGRect,
         margin: CGFloat = 12
     ) -> CGRect {
-        let offsetX: CGFloat = 28
-        let offsetY: CGFloat = 24
+        let offsetX: CGFloat = 52
+        let offsetY: CGFloat = 40
         let candidates = [
             CGPoint(x: anchor.x + offsetX, y: anchor.y - panelSize.height - offsetY),
             CGPoint(x: anchor.x + offsetX, y: anchor.y + offsetY),

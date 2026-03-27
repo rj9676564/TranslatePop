@@ -5,6 +5,7 @@ import Foundation
 final class SettingsStore: ObservableObject {
     @Published var providerConfiguration: ProviderConfiguration
     @Published var ocrEnabled: Bool
+    @Published var minimumEnglishRatio: Double
 
     private let defaults: UserDefaults
     private let service = "top.mrlb.TranslatePop"
@@ -17,6 +18,7 @@ final class SettingsStore: ObservableObject {
         let storedModel = defaults.string(forKey: "model") ?? ""
         let storedHeaders = defaults.string(forKey: "customHeaders") ?? ""
         let storedTimeout = defaults.object(forKey: "timeoutSeconds") as? Double ?? 20
+        let storedEnglishRatio = defaults.object(forKey: "minimumEnglishRatio") as? Double ?? 0.35
         let storedApiKey = KeychainHelper.read(service: service, account: "apiKey")
         self.providerConfiguration = ProviderConfiguration(
             providerName: storedProviderName,
@@ -28,6 +30,7 @@ final class SettingsStore: ObservableObject {
             customHeaders: storedHeaders
         )
         self.ocrEnabled = defaults.object(forKey: "ocrEnabled") as? Bool ?? true
+        self.minimumEnglishRatio = storedEnglishRatio
     }
 
     func save() {
@@ -38,6 +41,7 @@ final class SettingsStore: ObservableObject {
         defaults.set(providerConfiguration.timeoutSeconds, forKey: "timeoutSeconds")
         defaults.set(providerConfiguration.customHeaders, forKey: "customHeaders")
         defaults.set(ocrEnabled, forKey: "ocrEnabled")
+        defaults.set(minimumEnglishRatio, forKey: "minimumEnglishRatio")
         KeychainHelper.save(service: service, account: "apiKey", value: providerConfiguration.apiKey)
     }
 }

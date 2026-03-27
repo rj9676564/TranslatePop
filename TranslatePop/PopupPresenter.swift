@@ -12,9 +12,11 @@ final class PopupViewModel: ObservableObject {
 @MainActor
 final class PopupPresenter: NSObject, PopupPresenting {
     private let logger = Logger(subsystem: "top.mrlb.TranslatePop", category: "Popup")
-    private let panelSize = CGSize(width: 420, height: 320)
+    private let minPanelSize = CGSize(width: 420, height: 170)
+    private let maxPanelSize = CGSize(width: 520, height: 420)
     private let viewModel = PopupViewModel()
     private var panel: NSPanel?
+    private var hostingView: NSHostingView<PopupCardView>?
     private var dismissTask: Task<Void, Never>?
 
     func presentLoading(for selection: CapturedSelection) {
@@ -48,6 +50,7 @@ final class PopupPresenter: NSObject, PopupPresenting {
 
     private func showPanel(anchor: CGPoint) {
         let panel = self.panel ?? makePanel()
+        let panelSize = preferredPanelSize()
         let visibleFrame = NSScreen.screens.first(where: { $0.frame.contains(anchor) })?.visibleFrame
             ?? NSScreen.main?.visibleFrame
             ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
@@ -56,6 +59,10 @@ final class PopupPresenter: NSObject, PopupPresenting {
             panelSize: panelSize,
             visibleFrame: visibleFrame
         )
+        panel.ignoresMouseEvents = shouldIgnoreMouseEvents
+        if shouldIgnoreMouseEvents {
+            viewModel.isHovering = false
+        }
         panel.setFrame(panelFrame, display: true)
         panel.orderFrontRegardless()
         logger.info("弹窗已显示，x=\(panelFrame.origin.x, format: .fixed(precision: 0)) y=\(panelFrame.origin.y, format: .fixed(precision: 0))")
@@ -67,8 +74,9 @@ final class PopupPresenter: NSObject, PopupPresenting {
         } onClose: { [weak self] in
             self?.dismiss()
         }
+        let hostingView = NSHostingView(rootView: contentView)
         let panel = NSPanel(
-            contentRect: CGRect(origin: .zero, size: panelSize),
+            contentRect: CGRect(origin: .zero, size: minPanelSize),
             styleMask: [.nonactivatingPanel, .borderless],
             backing: .buffered,
             defer: true
@@ -80,9 +88,10 @@ final class PopupPresenter: NSObject, PopupPresenting {
         panel.hasShadow = true
         panel.isMovableByWindowBackground = false
         panel.hidesOnDeactivate = false
-        panel.ignoresMouseEvents = false
-        panel.contentView = NSHostingView(rootView: contentView)
+        panel.ignoresMouseEvents = true
+        panel.contentView = hostingView
         self.panel = panel
+        self.hostingView = hostingView
         return panel
     }
 
@@ -101,6 +110,26 @@ final class PopupPresenter: NSObject, PopupPresenting {
                 self.panel?.orderOut(nil)
             }
         }
+    }
+
+    private var shouldIgnoreMouseEvents: Bool {
+        switch viewModel.state {
+        case .error:
+            return false
+        case .idle, .loading, .result:
+            return true
+        }
+    }
+
+    private func preferredPanelSize() -> CGSize {
+        guard let hostingView else {
+            return minPanelSize
+        }
+
+        hostingView.layoutSubtreeIfNeeded()
+        let fittingHeight = hostingView.fittingSize.height
+        let preferredHeight = min(max(fittingHeight, minPanelSize.height), maxPanelSize.height)
+        return CGSize(width: maxPanelSize.width, height: preferredHeight)
     }
 }
 
@@ -128,8 +157,10 @@ private struct PopupCardView: View {
                             Text("原文")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                            Text(originalText)
+                            Text(formatted(originalText))
                                 .font(.body)
+                                .lineSpacing(3)
+                                .multilineTextAlignment(.leading)
                                 .textSelection(.enabled)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
@@ -149,8 +180,10 @@ private struct PopupCardView: View {
                             Text("翻译")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                            Text(result.translatedText)
+                            Text(formatted(result.translatedText))
                                 .font(.title3.weight(.semibold))
+                                .lineSpacing(4)
+                                .multilineTextAlignment(.leading)
                                 .textSelection(.enabled)
                                 .fixedSize(horizontal: false, vertical: true)
                             Text("来源：\(sourceLabel) · 接口：\(result.providerName)")
@@ -158,15 +191,15 @@ private struct PopupCardView: View {
                                 .foregroundStyle(.secondary)
                         }
                     case .error(let message, _, _):
-                        Text(message)
+                        Text(formatted(message))
                             .foregroundStyle(.red)
+                            .lineSpacing(3)
+                            .multilineTextAlignment(.leading)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-
-            Spacer(minLength: 0)
         }
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -181,6 +214,14 @@ private struct PopupCardView: View {
         .onHover { hovering in
             onHoverChanged(hovering)
         }
+    }
+
+    private func formatted(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .replacingOccurrences(of: "\n{3,}", with: "\n\n", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var title: String {

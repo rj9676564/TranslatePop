@@ -25,6 +25,7 @@ final class AppCoordinator: ObservableObject {
     private var statusBarController: StatusBarController?
     private var triggerDecisionEngine = TriggerDecisionEngine()
     private var globalMouseDownMonitor: Any?
+    private var globalSecondaryMouseDownMonitor: Any?
     private var globalMouseDraggedMonitor: Any?
     private var globalMouseUpMonitor: Any?
     private var isLeftMouseDragging = false
@@ -46,6 +47,9 @@ final class AppCoordinator: ObservableObject {
         }
         if let globalMouseUpMonitor {
             NSEvent.removeMonitor(globalMouseUpMonitor)
+        }
+        if let globalSecondaryMouseDownMonitor {
+            NSEvent.removeMonitor(globalSecondaryMouseDownMonitor)
         }
         if let globalMouseDraggedMonitor {
             NSEvent.removeMonitor(globalMouseDraggedMonitor)
@@ -119,10 +123,16 @@ final class AppCoordinator: ObservableObject {
 
         globalMouseDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
             guard let self, self.isMonitoring else { return }
+            self.popupPresenter.dismiss()
             self.isLeftMouseDragging = false
             if event.clickCount >= 2 {
                 self.scheduleTrigger(.doubleClick, location: NSEvent.mouseLocation)
             }
+        }
+
+        globalSecondaryMouseDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.rightMouseDown, .otherMouseDown]) { [weak self] _ in
+            guard let self, self.isMonitoring else { return }
+            self.popupPresenter.dismiss()
         }
 
         globalMouseDraggedMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDragged]) { [weak self] _ in
@@ -151,6 +161,7 @@ final class AppCoordinator: ObservableObject {
         refreshPermissions()
         do {
             let selection = try await makeSelectionCaptureService().captureSelection(near: location)
+            triggerDecisionEngine.minimumEnglishRatio = settingsStore.minimumEnglishRatio
             guard triggerDecisionEngine.shouldAccept(text: selection.text, now: .now) else {
                 DebugLogger.app.info("触发被去重过滤")
                 return

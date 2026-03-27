@@ -14,8 +14,8 @@ final class PopupViewModel: ObservableObject {
 final class PopupPresenter: NSObject, PopupPresenting {
     private let logger = Logger(subsystem: "top.mrlb.TranslatePop", category: "Popup")
     private let panelWidth: CGFloat = 520
-    private let minPanelHeight: CGFloat = 180
-    private let maxPanelHeight: CGFloat = 420
+    private let minPanelHeight: CGFloat = 280
+    private let maxPanelHeight: CGFloat = 620
     private let viewModel = PopupViewModel()
     private var panel: NSPanel?
     private var dismissTask: Task<Void, Never>?
@@ -66,14 +66,27 @@ final class PopupPresenter: NSObject, PopupPresenting {
             ?? NSScreen.main?.visibleFrame
             ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
         let layout = preferredPanelLayout()
+        logger.info("size \(layout.height)");
         let preserveVisibleFrame = shouldPreserveVisibleFrame(for: panel, anchor: anchor)
         viewModel.allowsScrolling = preserveVisibleFrame ? true : layout.allowsScrolling
-        let panelFrame = preserveVisibleFrame ? panel.frame : preferredFrame(
-            for: panel,
-            anchor: anchor,
-            visibleFrame: visibleFrame,
-            height: layout.height
-        )
+        let panelFrame: CGRect
+        if preserveVisibleFrame {
+            let currentFrame = panel.frame
+            let topY = currentFrame.maxY
+            panelFrame = CGRect(
+                x: currentFrame.origin.x,
+                y: topY - layout.height,
+                width: panelWidth,
+                height: layout.height
+            )
+        } else {
+            panelFrame = preferredFrame(
+                for: panel,
+                anchor: anchor,
+                visibleFrame: visibleFrame,
+                height: layout.height
+            )
+        }
         panel.ignoresMouseEvents = shouldIgnoreMouseEvents
         if shouldIgnoreMouseEvents {
             viewModel.isHovering = false
@@ -178,14 +191,20 @@ final class PopupPresenter: NSObject, PopupPresenting {
 
         totalHeight += 24
         let clampedHeight = min(max(totalHeight, minPanelHeight), maxPanelHeight)
-        return (clampedHeight, totalHeight > maxPanelHeight)
+        return (clampedHeight, totalHeight == maxPanelHeight)
     }
 
     private func shouldPreserveVisibleFrame(for panel: NSPanel, anchor: CGPoint) -> Bool {
         guard panel.isVisible,
-              case .loading = viewModel.state,
               let activeAnchor
         else {
+            return false
+        }
+
+        switch viewModel.state {
+        case .loading, .result:
+            break
+        case .idle, .pending, .error:
             return false
         }
 

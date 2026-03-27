@@ -301,15 +301,18 @@ final class PopupPresenter: NSObject, PopupPresenting {
         }
         
         let margin: CGFloat = 12
+        // X轴：窗口最左侧在鼠标之后 50 像素（如果右侧空间不够，系统则会自动靠齐屏幕右侧边缘防飞出）
         let x = min(
-            max(visibleFrame.midX - panelWidth / 2, visibleFrame.minX + margin),
+            max(anchor.x + 150, visibleFrame.minX + margin),
             visibleFrame.maxX - panelWidth - margin
         )
-        let preferredTopY = visibleFrame.maxY - 36
-        let topY = min(
-            max(preferredTopY, visibleFrame.minY + panelHeight + margin),
-            visibleFrame.maxY - margin
-        )
+        
+        // Y轴：优先放在鼠标下方稍稍偏移（距离大概20个像素），不遮挡划词的内容
+        let preferredTopY = anchor.y - 20
+        
+        // 只限制最高点不要飞出屏幕正上方（最低点不用在这里操心，后续 clampedFrame 遇到屏幕底部会自动把它“向上挤起”）
+        let topY = min(preferredTopY, visibleFrame.maxY - margin)
+        
         let point = CGPoint(x: x, y: topY)
         activeTopOrigin = point
         return point

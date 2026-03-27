@@ -17,6 +17,19 @@ struct TranslatePopTests {
     }
 
     @Test
+    func triggerDecisionEngineReportsRejectionReason() {
+        var engine = TriggerDecisionEngine(duplicateInterval: 1, maxTextLength: 5)
+
+        let tooLong = engine.rejectionReason(text: "hello world", now: Date(timeIntervalSince1970: 10))
+        let accepted = engine.rejectionReason(text: "hello", now: Date(timeIntervalSince1970: 11))
+        let duplicate = engine.rejectionReason(text: "hello", now: Date(timeIntervalSince1970: 11.2))
+
+        #expect(tooLong == .tooLong)
+        #expect(accepted == nil)
+        #expect(duplicate == .duplicate)
+    }
+
+    @Test
     func triggerDecisionEngineBlocksPunctuationOnlySelection() {
         var engine = TriggerDecisionEngine()
         let comma = engine.shouldAccept(text: "，", now: Date(timeIntervalSince1970: 20))

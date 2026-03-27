@@ -26,6 +26,7 @@ protocol OCRRecognizing: Sendable {
 
 @MainActor
 protocol PopupPresenting: AnyObject {
+    func presentPending(at anchor: CGPoint)
     func presentLoading(for selection: CapturedSelection)
     func presentResult(selection: CapturedSelection, result: TranslationResult)
     func presentError(message: String, originalText: String?, method: CaptureMethod?, anchor: CGPoint)

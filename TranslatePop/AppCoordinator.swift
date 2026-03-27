@@ -159,15 +159,22 @@ final class AppCoordinator: ObservableObject {
 
     private func handleTrigger(_ kind: SelectionTriggerKind, location: CGPoint) async {
         refreshPermissions()
+        popupPresenter.presentPending(at: location)
         do {
             let selection = try await makeSelectionCaptureService().captureSelection(near: location)
             triggerDecisionEngine.minimumEnglishRatio = settingsStore.minimumEnglishRatio
-            guard triggerDecisionEngine.shouldAccept(text: selection.text, now: .now) else {
-                DebugLogger.app.info("触发被去重过滤")
+            let limitedText = String(selection.text.prefix(triggerDecisionEngine.maxTextLength))
+            if selection.text.count > triggerDecisionEngine.maxTextLength {
+                DebugLogger.app.info("捕获文本超长，已截断为\(self.triggerDecisionEngine.maxTextLength, privacy: .public)字符")
+            }
+
+            if let rejectionReason = triggerDecisionEngine.rejectionReason(text: limitedText, now: .now) {
+                popupPresenter.dismiss()
+                latestStatus = "等待取词"
+                DebugLogger.app.info("触发被过滤：reason=\(rejectionReason.logDescription, privacy: .public)")
                 return
             }
 
-            let limitedText = String(selection.text.prefix(800))
             let normalizedSelection = CapturedSelection(
                 text: limitedText,
                 method: selection.method,
@@ -221,6 +228,7 @@ final class AppCoordinator: ObservableObject {
 
         refreshPermissions()
         let location = NSEvent.mouseLocation
+        popupPresenter.presentPending(at: location)
 
         do {
             let selection = try await OCRSelectionStrategy(recognizer: OCRService()).captureSelection(near: location)

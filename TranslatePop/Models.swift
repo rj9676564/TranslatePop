@@ -141,6 +141,7 @@ struct PermissionState: Equatable, Sendable {
 
 enum PopupContentState: Equatable, Sendable {
     case idle
+    case pending
     case loading(originalText: String, method: CaptureMethod)
     case result(CapturedSelection, TranslationResult)
     case error(message: String, originalText: String?, method: CaptureMethod?)
@@ -197,31 +198,58 @@ enum SelectionTriggerKind: Sendable {
     case dragSelection
 }
 
+enum TriggerRejectionReason: Equatable, Sendable {
+    case empty
+    case tooLong
+    case noMeaningfulContent
+    case insufficientEnglishRatio
+    case duplicate
+
+    var logDescription: String {
+        switch self {
+        case .empty:
+            return "empty"
+        case .tooLong:
+            return "too_long"
+        case .noMeaningfulContent:
+            return "no_meaningful_content"
+        case .insufficientEnglishRatio:
+            return "insufficient_english_ratio"
+        case .duplicate:
+            return "duplicate"
+        }
+    }
+}
+
 struct TriggerDecisionEngine {
     var duplicateInterval: TimeInterval = 1.2
-    var maxTextLength = 800
+    var maxTextLength = 3000
     var minimumEnglishRatio = 0.35
 
     private(set) var lastAcceptedText = ""
     private(set) var lastAcceptedAt = Date.distantPast
 
     mutating func shouldAccept(text: String, now: Date) -> Bool {
+        rejectionReason(text: text, now: now) == nil
+    }
+
+    mutating func rejectionReason(text: String, now: Date) -> TriggerRejectionReason? {
         let normalized = text
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
 
-        guard !normalized.isEmpty else { return false }
-        guard normalized.count <= maxTextLength else { return false }
-        guard normalized.containsMeaningfulContent else { return false }
-        guard normalized.englishLetterRatio >= minimumEnglishRatio else { return false }
+        guard !normalized.isEmpty else { return .empty }
+        guard normalized.count <= maxTextLength else { return .tooLong }
+        guard normalized.containsMeaningfulContent else { return .noMeaningfulContent }
+        guard normalized.englishLetterRatio >= minimumEnglishRatio else { return .insufficientEnglishRatio }
 
         if normalized == lastAcceptedText && now.timeIntervalSince(lastAcceptedAt) < duplicateInterval {
-            return false
+            return .duplicate
         }
 
         lastAcceptedText = normalized
         lastAcceptedAt = now
-        return true
+        return nil
     }
 }
 

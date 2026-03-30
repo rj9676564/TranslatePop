@@ -29,7 +29,10 @@ final class AppCoordinator: ObservableObject {
     private var globalSecondaryMouseDownMonitor: Any?
     private var globalMouseDraggedMonitor: Any?
     private var globalMouseUpMonitor: Any?
+    private var globalKeyDownMonitor: Any?
     private var isLeftMouseDragging = false
+    private var mouseDownTime: Date = .distantPast
+    private var lastManualCopyTime: Date = .distantPast
 
     init() {
         let settingsStore = SettingsStore()
@@ -54,6 +57,9 @@ final class AppCoordinator: ObservableObject {
         }
         if let globalMouseDraggedMonitor {
             NSEvent.removeMonitor(globalMouseDraggedMonitor)
+        }
+        if let globalKeyDownMonitor {
+            NSEvent.removeMonitor(globalKeyDownMonitor)
         }
     }
 
@@ -126,6 +132,8 @@ final class AppCoordinator: ObservableObject {
 
         globalMouseDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
             guard let self, self.isMonitoring else { return }
+            self.activeTranslationTask?.cancel()
+            self.mouseDownTime = Date()
             self.popupPresenter.dismissForUserInteraction(at: NSEvent.mouseLocation)
             self.isLeftMouseDragging = false
             if event.clickCount >= 2 {
@@ -135,7 +143,16 @@ final class AppCoordinator: ObservableObject {
 
         globalSecondaryMouseDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.rightMouseDown, .otherMouseDown]) { [weak self] _ in
             guard let self, self.isMonitoring else { return }
+            self.activeTranslationTask?.cancel()
             self.popupPresenter.dismissForUserInteraction(at: NSEvent.mouseLocation)
+        }
+
+        globalKeyDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+            guard let self, self.isMonitoring else { return }
+            let chars = event.charactersIgnoringModifiers?.lowercased()
+            if event.modifierFlags.contains(.command), chars == "c" || chars == "x" {
+                self.lastManualCopyTime = Date()
+            }
         }
 
         globalMouseDraggedMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDragged]) { [weak self] _ in
@@ -288,7 +305,7 @@ final class AppCoordinator: ObservableObject {
     private func makeSelectionCaptureService() -> SelectionCapturing {
         let strategies: [SelectionCaptureStrategy] = [
             AccessibilitySelectionStrategy(permissionService: permissionService),
-            ClipboardSelectionStrategy(permissionService: permissionService)
+            ClipboardSelectionStrategy(permissionService: permissionService, userDidManualCopy: self.lastManualCopyTime > self.mouseDownTime)
         ]
 
         return SelectionCaptureService(strategies: strategies)

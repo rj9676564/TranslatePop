@@ -99,9 +99,11 @@ struct AccessibilitySelectionStrategy: SelectionCaptureStrategy {
 struct ClipboardSelectionStrategy: SelectionCaptureStrategy {
     let method: CaptureMethod = .clipboard
     private let permissionService: PermissionService
+    private let userDidManualCopy: Bool
 
-    init(permissionService: PermissionService) {
+    init(permissionService: PermissionService, userDidManualCopy: Bool) {
         self.permissionService = permissionService
+        self.userDidManualCopy = userDidManualCopy
     }
 
     func captureSelection(near point: CGPoint) async throws -> CapturedSelection {
@@ -110,6 +112,11 @@ struct ClipboardSelectionStrategy: SelectionCaptureStrategy {
         }
 
         let pasteboard = NSPasteboard.general
+        if userDidManualCopy,
+           let copied = pasteboard.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !copied.isEmpty {
+            return CapturedSelection(text: copied, method: method, anchorPoint: point, capturedAt: .now)
+        }
         let originalItems = pasteboard.pasteboardItems?.map { item in
             item.types.reduce(into: [NSPasteboard.PasteboardType: Data]()) { partial, type in
                 partial[type] = item.data(forType: type)

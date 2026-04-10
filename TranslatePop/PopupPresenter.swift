@@ -29,6 +29,12 @@ final class PopupPresenter: NSObject, PopupPresenting {
     private var activeAnchor: CGPoint?
     private var activeTopOrigin: CGPoint?
 
+    func prepareOriginalTextForPaste() -> Bool {
+        guard let text = currentOriginalText else { return false }
+        writeTextToPasteboard(text, logMessage: "已为粘贴动作写入原文到剪贴板")
+        return true
+    }
+
     func presentPending(at anchor: CGPoint) {
         logger.info("展示预加载弹窗")
         activeTopOrigin = nil
@@ -92,6 +98,15 @@ final class PopupPresenter: NSObject, PopupPresenting {
         dismiss()
     }
 
+    var isVisible: Bool {
+        panel?.isVisible ?? false
+    }
+
+    func isMouseInside(at point: CGPoint) -> Bool {
+        guard let panel, panel.isVisible else { return false }
+        return panel.frame.contains(point)
+    }
+
     private func showPanel(anchor: CGPoint) {
         let panel = self.panel ?? makePanel()
         let visibleFrame = NSScreen.main?.visibleFrame
@@ -139,12 +154,18 @@ final class PopupPresenter: NSObject, PopupPresenting {
         } onClose: { [weak self] in
             self?.dismiss()
         }
-        let panel = NSPanel(
+        let panel = PopupPanel(
             contentRect: CGRect(origin: .zero, size: CGSize(width: panelWidth, height: panelHeight)),
             styleMask: [.nonactivatingPanel, .borderless],
             backing: .buffered,
             defer: true
         )
+        panel.onCopyRequest = { [weak self] in
+            self?.copyToClipboard()
+        }
+        panel.onPasteRequest = { [weak self] in
+            _ = self?.prepareOriginalTextForPaste()
+        }
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
         panel.isFloatingPanel = true
         panel.level = .statusBar
@@ -177,16 +198,12 @@ final class PopupPresenter: NSObject, PopupPresenting {
         }
     }
 
-    private var shouldIgnoreMouseEvents: Bool {
+    var shouldIgnoreMouseEvents: Bool {
         switch viewModel.state {
-        case .error:
-            return false
-        case .streaming:
-            return !viewModel.allowsScrolling
-        case .result:
-            return !viewModel.allowsScrolling
-        case .idle, .pending, .loading:
+        case .pending, .idle:
             return true
+        default:
+            return false
         }
     }
 
@@ -336,7 +353,7 @@ final class PopupPresenter: NSObject, PopupPresenting {
         return ceil(rect.height)
     }
 
-    private var currentOriginalText: String? {
+    var currentOriginalText: String? {
         switch viewModel.state {
         case .pending:
             return nil
@@ -351,6 +368,43 @@ final class PopupPresenter: NSObject, PopupPresenting {
         case .idle:
             return nil
         }
+    }
+
+    private func copyToClipboard() {
+        guard let text = currentOriginalText else { return }
+        writeTextToPasteboard(text, logMessage: "已通过快捷键复制原文到剪贴板")
+    }
+
+    private func writeTextToPasteboard(_ text: String, logMessage: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        logger.info("\(logMessage, privacy: .public)")
+    }
+}
+
+private final class PopupPanel: NSPanel {
+    var onCopyRequest: (() -> Void)?
+    var onPasteRequest: (() -> Void)?
+
+    override var canBecomeKey: Bool { true }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let chars = event.charactersIgnoringModifiers?.lowercased()
+        if event.modifierFlags.contains(.command), chars == "c" {
+            // 首先尝试让响应链处理（比如 SwiftUI 的文本选中逻辑）
+            if super.performKeyEquivalent(with: event) {
+                return true
+            }
+            // 如果响应链没有处理，说明当前可能没有明确的选中内容，
+            // 此时执行我们自定义的“兜底”复制逻辑
+            onCopyRequest?()
+            return true
+        }
+        if event.modifierFlags.contains(.command), chars == "v" {
+            onPasteRequest?()
+        }
+        return super.performKeyEquivalent(with: event)
     }
 }
 

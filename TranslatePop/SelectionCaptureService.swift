@@ -127,7 +127,14 @@ struct ClipboardSelectionStrategy: SelectionCaptureStrategy {
         try simulateCopyShortcut()
 
         try await Task.sleep(for: .milliseconds(180))
-        guard pasteboard.changeCount != originalChangeCount,
+        
+        // 如果在等待期间任务被取消（例如用户手动触发了复制），则不再执行后续逻辑，更不能恢复旧剪贴板
+        if Task.isCancelled {
+            throw CancellationError()
+        }
+
+        let currentChangeCount = pasteboard.changeCount
+        guard currentChangeCount != originalChangeCount,
               let copied = pasteboard.string(forType: .string)?
                 .trimmingCharacters(in: .whitespacesAndNewlines),
               !copied.isEmpty else {
@@ -135,7 +142,13 @@ struct ClipboardSelectionStrategy: SelectionCaptureStrategy {
             throw CaptureFailure.clipboardUnavailable
         }
 
-        restorePasteboard(originalItems)
+        // 核心竞争保护逻辑：
+        // 如果 changeCount 正好只增加了 1（即只有模拟复制这一步），我们执行恢复逻辑。
+        // 如果增加了超过 1，说明在此期间用户很大率也执行了手动复制，此时跳过恢复以保护用户内容。
+        if currentChangeCount == originalChangeCount + 1 {
+            restorePasteboard(originalItems)
+        }
+        
         return CapturedSelection(text: copied, method: method, anchorPoint: point, capturedAt: .now)
     }
 

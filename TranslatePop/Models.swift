@@ -204,6 +204,12 @@ enum SelectionTriggerKind: Sendable {
     case dragSelection
 }
 
+enum TriggerMode: String, Codable, CaseIterable, Sendable {
+    case automatic = "自动（划词或双击）"
+    case modifierKey = "按住 Option 键"
+    case manualOnly = "手动（点击图标或快捷键）"
+}
+
 enum TriggerRejectionReason: Equatable, Sendable {
     case empty
     case tooLong

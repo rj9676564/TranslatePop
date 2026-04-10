@@ -4,6 +4,7 @@ import Foundation
 @MainActor
 final class SettingsStore: ObservableObject {
     @Published var providerConfiguration: ProviderConfiguration
+    @Published var triggerMode: TriggerMode
     @Published var ocrEnabled: Bool
     @Published var minimumEnglishRatio: Double
 
@@ -29,6 +30,8 @@ final class SettingsStore: ObservableObject {
             timeoutSeconds: storedTimeout,
             customHeaders: storedHeaders
         )
+        let storedTriggerMode = TriggerMode(rawValue: defaults.string(forKey: "triggerMode") ?? "") ?? .automatic
+        self.triggerMode = storedTriggerMode
         self.ocrEnabled = defaults.object(forKey: "ocrEnabled") as? Bool ?? true
         self.minimumEnglishRatio = storedEnglishRatio
     }
@@ -40,6 +43,7 @@ final class SettingsStore: ObservableObject {
         defaults.set(providerConfiguration.model, forKey: "model")
         defaults.set(providerConfiguration.timeoutSeconds, forKey: "timeoutSeconds")
         defaults.set(providerConfiguration.customHeaders, forKey: "customHeaders")
+        defaults.set(triggerMode.rawValue, forKey: "triggerMode")
         defaults.set(ocrEnabled, forKey: "ocrEnabled")
         defaults.set(minimumEnglishRatio, forKey: "minimumEnglishRatio")
         KeychainHelper.save(service: service, account: "apiKey", value: providerConfiguration.apiKey)

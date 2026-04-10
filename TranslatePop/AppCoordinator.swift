@@ -150,8 +150,18 @@ final class AppCoordinator: ObservableObject {
         globalKeyDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
             guard let self, self.isMonitoring else { return }
             let chars = event.charactersIgnoringModifiers?.lowercased()
-            if event.modifierFlags.contains(.command), chars == "c" || chars == "x" {
-                self.lastManualCopyTime = Date()
+            
+            // 处理复制、剪切、粘贴快捷键
+            if event.modifierFlags.contains(.command), (chars == "c" || chars == "x" || chars == "v") {
+                if chars == "c" || chars == "x" {
+                    self.lastManualCopyTime = Date()
+                }
+
+                // 当悬浮窗显示且鼠标不在其范围内时，用户触发复制/粘贴通常意味着当前翻译流已不再被需要
+                if self.popupPresenter.isVisible, !self.popupPresenter.isMouseInside(at: NSEvent.mouseLocation) {
+                    self.popupPresenter.dismiss()
+                    DebugLogger.app.info("用户在外部触发剪贴板操作，自动关闭弹窗")
+                }
             }
         }
 
@@ -172,10 +182,26 @@ final class AppCoordinator: ObservableObject {
         DebugLogger.app.info("收到触发事件：kind=\(String(describing: kind), privacy: .public)")
         activeTranslationTask?.cancel()
         activeTranslationTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            
+            // 根据触发模式判断是否静默
+            switch self.settingsStore.triggerMode {
+            case .modifierKey:
+                // 仅在按住 Option 键时触发
+                if !NSEvent.modifierFlags.contains(.option) {
+                    return
+                }
+            case .manualOnly:
+                // 不会自动触发
+                return
+            case .automatic:
+                break
+            }
+
             let delay: Duration = kind == .doubleClick ? .milliseconds(160) : .milliseconds(220)
             do {
                 try await Task.sleep(for: delay)
-                await self?.handleTrigger(kind, location: location)
+                await self.handleTrigger(kind, location: location)
             } catch {
                 return
             }

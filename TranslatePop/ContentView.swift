@@ -28,7 +28,7 @@ struct MenuBarContentView: View {
 
             Divider()
 
-            Text("提示：双击单词或按住拖选句子后，会在鼠标附近弹出翻译卡片。首次使用请先在设置中完成权限授权。")
+            Text("提示：双击单词或按住拖选句子后，会在鼠标附近弹出翻译卡片。如果你觉得弹窗太频繁，可以在设置中开启“按住 Option 键”触发。")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -98,6 +98,15 @@ struct SettingsRootView: View {
             }
 
             Section("触发规则") {
+                Picker("触发方式", selection: triggerModeBinding) {
+                    ForEach(TriggerMode.allCases, id: \.self) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+                Text("“按住 Option 键”模式下，只有在拖选或双击时按住 ⌥ 键才会弹出翻译。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                
                 HStack {
                     Text("最低英语比例")
                     Slider(value: englishRatioBinding, in: 0.1...0.9, step: 0.05)
@@ -105,7 +114,7 @@ struct SettingsRootView: View {
                         .foregroundStyle(.secondary)
                         .frame(width: 48)
                 }
-                Text("只有当选中文本中的英文字母占比达到这个阈值时，才会弹出翻译窗口。默认 35%。")
+                Text("只有当选中文本中的英文字母占比达到这个阈值时，才会启动自动翻译。默认 35%。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -153,6 +162,13 @@ struct SettingsRootView: View {
         Binding(
             get: { coordinator.settingsStore.minimumEnglishRatio },
             set: { coordinator.settingsStore.minimumEnglishRatio = $0 }
+        )
+    }
+
+    private var triggerModeBinding: Binding<TriggerMode> {
+        Binding(
+            get: { coordinator.settingsStore.triggerMode },
+            set: { coordinator.settingsStore.triggerMode = $0 }
         )
     }
 

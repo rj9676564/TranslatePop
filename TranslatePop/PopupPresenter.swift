@@ -29,12 +29,6 @@ final class PopupPresenter: NSObject, PopupPresenting {
     private var activeAnchor: CGPoint?
     private var activeTopOrigin: CGPoint?
 
-    func prepareOriginalTextForPaste() -> Bool {
-        guard let text = currentOriginalText else { return false }
-        writeTextToPasteboard(text, logMessage: "已为粘贴动作写入原文到剪贴板")
-        return true
-    }
-
     func presentPending(at anchor: CGPoint) {
         logger.info("展示预加载弹窗")
         activeTopOrigin = nil
@@ -160,12 +154,6 @@ final class PopupPresenter: NSObject, PopupPresenting {
             backing: .buffered,
             defer: true
         )
-        panel.onCopyRequest = { [weak self] in
-            self?.copyToClipboard()
-        }
-        panel.onPasteRequest = { [weak self] in
-            _ = self?.prepareOriginalTextForPaste()
-        }
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
         panel.isFloatingPanel = true
         panel.level = .statusBar
@@ -216,7 +204,7 @@ final class PopupPresenter: NSObject, PopupPresenting {
         if let originalText = currentOriginalText, !originalText.isEmpty {
             totalHeight += 22
             totalHeight += measuredHeight(
-                for: formatted(originalText),
+                for: originalText,
                 width: textWidth,
                 font: .systemFont(ofSize: 13, weight: .regular),
                 lineSpacing: 3
@@ -234,7 +222,7 @@ final class PopupPresenter: NSObject, PopupPresenting {
         case .streaming(_, let partialText, _):
             totalHeight += 22
             totalHeight += measuredHeight(
-                for: formatted(partialText),
+                for: partialText,
                 width: textWidth,
                 font: .systemFont(ofSize: 15, weight: .semibold),
                 lineSpacing: 4
@@ -243,7 +231,7 @@ final class PopupPresenter: NSObject, PopupPresenting {
         case .result(_, let result):
             totalHeight += 22
             totalHeight += measuredHeight(
-                for: formatted(result.translatedText),
+                for: result.translatedText,
                 width: textWidth,
                 font: .systemFont(ofSize: 15, weight: .semibold),
                 lineSpacing: 4
@@ -251,7 +239,7 @@ final class PopupPresenter: NSObject, PopupPresenting {
             totalHeight += 26
         case .error(let message, _, _):
             totalHeight += measuredHeight(
-                for: formatted(message),
+                for: message,
                 width: textWidth,
                 font: .systemFont(ofSize: 13, weight: .regular),
                 lineSpacing: 3
@@ -370,42 +358,10 @@ final class PopupPresenter: NSObject, PopupPresenting {
         }
     }
 
-    private func copyToClipboard() {
-        guard let text = currentOriginalText else { return }
-        writeTextToPasteboard(text, logMessage: "已通过快捷键复制原文到剪贴板")
-    }
-
-    private func writeTextToPasteboard(_ text: String, logMessage: String) {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
-        logger.info("\(logMessage, privacy: .public)")
-    }
 }
 
 private final class PopupPanel: NSPanel {
-    var onCopyRequest: (() -> Void)?
-    var onPasteRequest: (() -> Void)?
-
-    override var canBecomeKey: Bool { true }
-
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        let chars = event.charactersIgnoringModifiers?.lowercased()
-        if event.modifierFlags.contains(.command), chars == "c" {
-            // 首先尝试让响应链处理（比如 SwiftUI 的文本选中逻辑）
-            if super.performKeyEquivalent(with: event) {
-                return true
-            }
-            // 如果响应链没有处理，说明当前可能没有明确的选中内容，
-            // 此时执行我们自定义的“兜底”复制逻辑
-            onCopyRequest?()
-            return true
-        }
-        if event.modifierFlags.contains(.command), chars == "v" {
-            onPasteRequest?()
-        }
-        return super.performKeyEquivalent(with: event)
-    }
+    override var canBecomeKey: Bool { false }
 }
 
 private struct PopupCardView: View {
@@ -480,7 +436,9 @@ private struct PopupCardView: View {
                     Text("原文")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text(attributedText(for: formatted(originalText), font: .systemFont(ofSize: 13, weight: .regular), lineSpacing: 3))
+                    Text(originalText)
+                        .font(.system(size: 13))
+                        .lineSpacing(3)
                         .multilineTextAlignment(.leading)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
@@ -512,7 +470,7 @@ private struct PopupCardView: View {
                     Text("翻译")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text(attributedText(for: formatted(partialText), font: .systemFont(ofSize: 15, weight: .semibold), lineSpacing: 4))
+                    Text(LocalizedStringKey(partialText))
                         .multilineTextAlignment(.leading)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
@@ -525,7 +483,7 @@ private struct PopupCardView: View {
                     Text("翻译")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text(attributedText(for: formatted(result.translatedText), font: .systemFont(ofSize: 15, weight: .semibold), lineSpacing: 4))
+                    Text(LocalizedStringKey(result.translatedText))
                         .multilineTextAlignment(.leading)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
@@ -534,7 +492,9 @@ private struct PopupCardView: View {
                         .foregroundStyle(.secondary)
                 }
             case .error(let message, _, _):
-                Text(attributedText(for: formatted(message), font: .systemFont(ofSize: 13, weight: .regular), lineSpacing: 3))
+                Text(message)
+                    .font(.system(size: 13))
+                    .lineSpacing(3)
                     .foregroundStyle(.red)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
@@ -612,21 +572,8 @@ private struct PopupCardView: View {
     }
 }
 
-fileprivate func formatted(_ text: String) -> String {
-    // 先统一平台换行符
-    let normalized = text
-        .replacingOccurrences(of: "\r\n", with: "\n")
-        .replacingOccurrences(of: "\r", with: "\n")
-    
-    // 使用正则：如果单个换行符前后都不是换行符，就把它替换成空格
-    guard let regex = try? NSRegularExpression(pattern: "(?<!\n)\n(?!\n)", options: []) else { return normalized }
-    
-    let range = NSRange(normalized.startIndex..., in: normalized)
-    let singleLineBreakReplaced = regex.stringByReplacingMatches(in: normalized, options: [], range: range, withTemplate: " ")
-    
-    return singleLineBreakReplaced
-        .replacingOccurrences(of: "\n{3,}", with: "\n\n", options: .regularExpression)
-        .trimmingCharacters(in: .whitespacesAndNewlines)
+fileprivate func cleanText(_ text: String) -> String {
+    return text.trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
 fileprivate func attributedText(for string: String, font: NSFont, lineSpacing: CGFloat) -> AttributedString {

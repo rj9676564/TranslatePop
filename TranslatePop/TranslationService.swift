@@ -107,12 +107,36 @@ struct ZhipuTranslationAdapter: TranslationProviderAdapting {
 struct TranslationResponseParser {
     static func parse(data: Data) throws -> ParsedTranslation {
         let response = try JSONDecoder().decode(ChatCompletionResponse.self, from: data)
-        let text = response.choices.first?.message.content
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !text.isEmpty else {
+        let rawText = response.choices.first?.message.content ?? ""
+        let cleanedText = cleanResponse(rawText)
+        guard !cleanedText.isEmpty else {
             throw TranslationFailure.emptyTranslation
         }
-        return ParsedTranslation(text: text)
+        return ParsedTranslation(text: cleanedText)
+    }
+
+    static func cleanResponse(_ text: String) -> String {
+        var cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // 移除 ```markdown ... ``` 这种包装
+        if cleaned.hasPrefix("```markdown") {
+            cleaned = String(cleaned.dropFirst(11))
+        } else if cleaned.hasPrefix("```") {
+            cleaned = String(cleaned.dropFirst(3))
+        }
+        
+        if cleaned.hasSuffix("```") {
+            cleaned = String(cleaned.dropLast(3))
+        }
+        
+        // 有些 AI 会在开头直接写 "markdown\n" 而没有反引号，也要删掉
+        if cleaned.lowercased().hasPrefix("markdown\n") {
+            cleaned = String(cleaned.dropFirst(9))
+        } else if cleaned.lowercased().hasPrefix("markdown ") {
+            cleaned = String(cleaned.dropFirst(9))
+        }
+        
+        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

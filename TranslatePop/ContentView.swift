@@ -54,7 +54,7 @@ struct SettingsRootView: View {
                 }
                 TextField("Provider 名称", text: providerBinding(\.providerName))
                 TextField("Base URL", text: providerBinding(\.baseURL))
-                SecureField("API Key", text: providerBinding(\.apiKey))
+                TextField("API Key", text: providerBinding(\.apiKey))
                 TextField("Model（可选）", text: providerBinding(\.model))
                 HStack {
                     Text("超时")
@@ -129,9 +129,10 @@ struct SettingsRootView: View {
                 }
                 .disabled(isTesting)
 
-                Button("保存配置") {
-                    coordinator.saveSettings()
+                Button("清除所有翻译缓存") {
+                    TranslationStore.shared.clearAll()
                 }
+                .foregroundStyle(.red)
 
                 Text(coordinator.latestStatus)
                     .font(.footnote)

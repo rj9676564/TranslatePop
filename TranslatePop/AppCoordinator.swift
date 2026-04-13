@@ -25,6 +25,7 @@ final class AppCoordinator: ObservableObject {
     private var statusBarController: StatusBarController?
     private var triggerDecisionEngine = TriggerDecisionEngine()
     private var activeTranslationTask: Task<Void, Never>?
+    private var cancellables = Set<AnyCancellable>()
     private var globalMouseDownMonitor: Any?
     private var globalSecondaryMouseDownMonitor: Any?
     private var globalMouseDraggedMonitor: Any?
@@ -42,6 +43,15 @@ final class AppCoordinator: ObservableObject {
         self.permissionState = permissionService.currentState()
         self.popupPresenter = PopupPresenter()
         self.statusBarController = StatusBarController(coordinator: self)
+        
+        // 关键修复：订阅 settingsStore 的变动并转发给 Coordinator
+        settingsStore.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &cancellables)
+
         startMonitoring()
     }
 
@@ -150,18 +160,11 @@ final class AppCoordinator: ObservableObject {
         globalKeyDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
             guard let self, self.isMonitoring else { return }
             let chars = event.charactersIgnoringModifiers?.lowercased()
-            
-            // 处理复制、剪切、粘贴快捷键
-            if event.modifierFlags.contains(.command), (chars == "c" || chars == "x" || chars == "v") {
-                if chars == "c" || chars == "x" {
-                    self.lastManualCopyTime = Date()
-                }
 
-                // 当悬浮窗显示且鼠标不在其范围内时，用户触发复制/粘贴通常意味着当前翻译流已不再被需要
-                if self.popupPresenter.isVisible, !self.popupPresenter.isMouseInside(at: NSEvent.mouseLocation) {
-                    self.popupPresenter.dismiss()
-                    DebugLogger.app.info("用户在外部触发剪贴板操作，自动关闭弹窗")
-                }
+            // 仅记录用户真实复制/剪切时间，用于后续剪贴板回退策略判断。
+            // 不再在这里干预弹窗或粘贴流程，避免影响开发过程中的正常复制/粘贴。
+            if event.modifierFlags.contains(.command), (chars == "c" || chars == "x") {
+                self.lastManualCopyTime = Date()
             }
         }
 

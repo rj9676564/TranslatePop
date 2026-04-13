@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import SwiftData
 
 enum CaptureMethod: String, Codable, CaseIterable, Sendable {
     case accessibility = "辅助功能"
@@ -18,14 +19,86 @@ struct TranslationRequest: Equatable, Sendable {
     var text: String
     var sourceLanguage: String?
     var targetLanguage: String = "zh-Hans"
-    var systemPrompt: String = "You are a translation engine. Detect the source language automatically and translate the user text into concise Simplified Chinese. Return translation only."
+    
+    var systemPrompt: String {
+        let isWord = !text.trimmingCharacters(in: .whitespacesAndNewlines).contains(" ")
+        if isWord {
+            return """
+            You are a professional dictionary and etymology expert.
+
+            For the given word, generate a structured and precise entry by strictly following the format below.
+
+            ---
+
+            1. **Result**
+            - Provide the core Simplified Chinese meaning only.
+            - Keep it concise and accurate.
+            - Output must start directly with **bold Chinese translation**.
+
+            ---
+
+            2. **Etymology (词源解析)**
+            - Explain the origin and source language (e.g., Latin, Greek, Old English).
+            - If the word is a **compound word**, explain how base words combine.
+              → In this case, DO NOT include “词形结构”.
+            - If the word is a **derived word**, explain the root meaning.
+
+            ---
+
+            3. **词形结构** (ONLY for derived words)
+            - Prefix: (only if it is a real linguistic prefix)
+            - Root: 
+            - Suffix: (only if it is a real linguistic suffix)
+
+            ---
+
+            4. **Collocations (常用搭配)**
+            - Provide 2–3 natural English collocations
+            - Each must include a concise Chinese meaning
+
+            ---
+
+            **STRICT RULES (MUST FOLLOW):**
+            - Do NOT invent prefixes or suffixes.
+            - Do NOT treat parts of compound words as affixes.
+            - Do NOT output empty sections.
+            - Do NOT output “无 / None / 没有”.
+            - Keep explanations concise and professional.
+            - All explanations must be in Simplified Chinese.
+            - Keep formatting clean and consistent.
+            """
+        } else {
+            return "You are a translation engine. Detect the source language automatically and translate the user text into concise Simplified Chinese. Return translation only."
+        }
+    }
 }
 
-struct TranslationResult: Equatable, Sendable {
+struct TranslationResult: Equatable, Sendable, Codable {
     let originalText: String
     let translatedText: String
     let detectedSourceLanguage: String?
     let providerName: String
+}
+
+@Model
+final class TranslationHistoryItem {
+    @Attribute(.unique) var normalizedText: String
+    var originalText: String
+    var translatedText: String
+    var providerName: String
+    var createdAt: Date
+    
+    // 预留字段：方便以后做“生词本”或“星标”功能
+    var isFavorite: Bool = false
+    var lookupCount: Int = 1
+
+    init(result: TranslationResult) {
+        self.normalizedText = result.originalText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        self.originalText = result.originalText
+        self.translatedText = result.translatedText
+        self.providerName = result.providerName
+        self.createdAt = Date()
+    }
 }
 
 struct TranslationStreamUpdate: Equatable, Sendable {

@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import SwiftData
 
 @main
 struct TranslatePopApp: App {
@@ -16,8 +17,9 @@ struct TranslatePopApp: App {
         Settings {
             SettingsRootView()
                 .environmentObject(coordinator)
-                .frame(minWidth: 720, minHeight: 620)
+                .frame(minWidth: 720, maxWidth: .infinity, minHeight: 760, maxHeight: .infinity)
         }
+        .modelContainer(for: TranslationHistoryItem.self)
     }
 }
 

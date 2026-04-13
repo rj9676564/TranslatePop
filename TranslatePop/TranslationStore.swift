@@ -22,7 +22,8 @@ final class TranslationStore {
     }
 
     func get(for text: String) -> TranslationResult? {
-        let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let normalized = LookupTextNormalizer.normalize(text)
+        let originalText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let predicate = #Predicate<TranslationHistoryItem> { item in
             item.normalizedText == normalized
         }
@@ -34,7 +35,7 @@ final class TranslationStore {
                 item.lookupCount += 1
                 item.createdAt = Date()
                 return TranslationResult(
-                    originalText: item.originalText,
+                    originalText: originalText,
                     translatedText: item.translatedText,
                     detectedSourceLanguage: nil,
                     providerName: item.providerName
@@ -47,7 +48,7 @@ final class TranslationStore {
     }
 
     func save(_ result: TranslationResult) {
-        let normalized = result.originalText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let normalized = LookupTextNormalizer.normalize(result.originalText)
         let predicate = #Predicate<TranslationHistoryItem> { item in
             item.normalizedText == normalized
         }

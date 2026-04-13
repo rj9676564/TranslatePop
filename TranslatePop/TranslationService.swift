@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 struct TranslationService: Translating {
     private let configuration: ProviderConfiguration
@@ -173,6 +174,7 @@ private extension TranslationProviderAdapting {
             urlRequest.setValue(value, forHTTPHeaderField: key)
         }
         urlRequest.httpBody = try JSONEncoder().encode(payload)
+        logRequest(urlRequest, configuration: configuration, stream: stream)
         return urlRequest
     }
 
@@ -197,6 +199,7 @@ private extension TranslationProviderAdapting {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw TranslationFailure.invalidResponse
         }
+        logResponse(httpResponse, data: data, stream: false)
         if httpResponse.statusCode == 401 {
             throw TranslationFailure.unauthorized
         }
@@ -232,11 +235,13 @@ private extension TranslationProviderAdapting {
                     guard let httpResponse = response as? HTTPURLResponse else {
                         throw TranslationFailure.invalidResponse
                     }
+                    logStreamingResponse(httpResponse)
                     if httpResponse.statusCode == 401 {
                         throw TranslationFailure.unauthorized
                     }
                     guard (200..<300).contains(httpResponse.statusCode) else {
                         let data = try await collectData(from: bytes)
+                        logResponse(httpResponse, data: data, stream: true)
                         let message = String(data: data, encoding: .utf8) ?? "status=\(httpResponse.statusCode)"
                         throw TranslationFailure.network(message)
                     }
@@ -244,6 +249,7 @@ private extension TranslationProviderAdapting {
                     let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type") ?? ""
                     if !contentType.localizedCaseInsensitiveContains("text/event-stream") {
                         let data = try await collectData(from: bytes)
+                        logResponse(httpResponse, data: data, stream: true)
                         let decoded = try TranslationResponseParser.parse(data: data)
                         continuation.yield(.init(text: decoded.text, providerName: configuration.providerName))
                         continuation.finish()
@@ -251,6 +257,7 @@ private extension TranslationProviderAdapting {
                     }
 
                     var accumulatedText = ""
+                    var chunkCount = 0
                     for try await line in bytes.lines {
                         guard !Task.isCancelled else { return }
                         let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -263,12 +270,21 @@ private extension TranslationProviderAdapting {
                         guard let data = payload.data(using: .utf8) else { continue }
                         if let chunk = try StreamingTranslationResponseParser.parse(data: data),
                            !chunk.isEmpty {
+                            chunkCount += 1
+                            if chunkCount <= 3 || chunkCount % 20 == 0 {
+                                DebugLogger.network.info(
+                                    "HTTP 流式 chunk：index=\(chunkCount, privacy: .public) length=\(chunk.count, privacy: .public) preview=\(self.preview(chunk), privacy: .public)"
+                                )
+                            }
                             accumulatedText += chunk
                             continuation.yield(.init(text: accumulatedText, providerName: configuration.providerName))
                         }
                     }
 
                     let finalText = accumulatedText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    DebugLogger.network.info(
+                        "HTTP 流式完成：chunks=\(chunkCount, privacy: .public) finalLength=\(finalText.count, privacy: .public)"
+                    )
                     guard !finalText.isEmpty else {
                         throw TranslationFailure.emptyTranslation
                     }
@@ -292,6 +308,57 @@ private extension TranslationProviderAdapting {
             data.append(byte)
         }
         return data
+    }
+
+    func logRequest(_ request: URLRequest, configuration: ProviderConfiguration, stream: Bool) {
+        let method = request.httpMethod ?? "GET"
+        let url = request.url?.absoluteString ?? "unknown"
+        let timeout = Int(request.timeoutInterval)
+        let headers = sanitizedHeaders(from: request)
+        let bodyPreview = preview(request.httpBody.flatMap { String(data: $0, encoding: .utf8) } ?? "")
+
+        DebugLogger.network.info(
+            "HTTP 请求：method=\(method, privacy: .public) url=\(url, privacy: .public) provider=\(configuration.providerName, privacy: .public) model=\(configuration.effectiveModel, privacy: .public) stream=\(stream, privacy: .public) timeout=\(timeout, privacy: .public)s headers=\(headers, privacy: .public) body=\(bodyPreview, privacy: .public)"
+        )
+    }
+
+    func logResponse(_ response: HTTPURLResponse, data: Data, stream: Bool) {
+        let contentType = response.value(forHTTPHeaderField: "Content-Type") ?? "unknown"
+        let bodyPreview = preview(String(data: data, encoding: .utf8) ?? "")
+        DebugLogger.network.info(
+            "HTTP 响应：status=\(response.statusCode, privacy: .public) stream=\(stream, privacy: .public) contentType=\(contentType, privacy: .public) body=\(bodyPreview, privacy: .public)"
+        )
+    }
+
+    func logStreamingResponse(_ response: HTTPURLResponse) {
+        let contentType = response.value(forHTTPHeaderField: "Content-Type") ?? "unknown"
+        DebugLogger.network.info(
+            "HTTP 流式响应头：status=\(response.statusCode, privacy: .public) contentType=\(contentType, privacy: .public)"
+        )
+    }
+
+    func sanitizedHeaders(from request: URLRequest) -> String {
+        let headers = request.allHTTPHeaderFields ?? [:]
+        if headers.isEmpty { return "{}" }
+        let pairs = headers
+            .sorted { $0.key < $1.key }
+            .map { key, value -> String in
+                if key.caseInsensitiveCompare("Authorization") == .orderedSame {
+                    return "\(key): Bearer ***"
+                }
+                return "\(key): \(value)"
+            }
+        return "{\(pairs.joined(separator: ", "))}"
+    }
+
+    func preview(_ text: String, limit: Int = 280) -> String {
+        let normalized = text
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
+        if normalized.count <= limit {
+            return normalized
+        }
+        return String(normalized.prefix(limit)) + "..."
     }
 }
 

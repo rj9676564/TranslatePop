@@ -19,57 +19,82 @@ struct TranslationRequest: Equatable, Sendable {
     var text: String
     var sourceLanguage: String?
     var targetLanguage: String = "zh-Hans"
+
+    var normalizedLookupText: String {
+        LookupTextNormalizer.normalize(text)
+    }
     
     var systemPrompt: String {
-        let isWord = !text.trimmingCharacters(in: .whitespacesAndNewlines).contains(" ")
+        let isWord = LookupTextNormalizer.isSingleEnglishWord(text)
         if isWord {
             return """
-            You are a professional dictionary and etymology expert.
+            你是一位专业的词典与词源学专家。
 
-            For the given word, generate a structured and precise entry by strictly following the format below.
+            请针对给定单词，严格按照以下结构输出内容：
 
             ---
 
             1. **Result**
-            - Provide the core Simplified Chinese meaning only.
-            - Keep it concise and accurate.
-            - Output must start directly with **bold Chinese translation**.
+            - 直接给出该单词的中文核心释义（使用**加粗**）。
+            - 保持简洁、准确，不要添加多余解释。
 
             ---
 
-            2. **Etymology (词源解析)**
-            - Explain the origin and source language (e.g., Latin, Greek, Old English).
-            - If the word is a **compound word**, explain how base words combine.
-              → In this case, DO NOT include “词形结构”.
-            - If the word is a **derived word**, explain the root meaning.
+            2. **词源解析（Etymology）**
+            - 说明该词的来源语言（如拉丁语、希腊语、古英语等）及其演变过程。
+            - 如果是**复合词**（如 however、into），请说明各部分单词如何组合形成该词。
+              → 此情况下必须跳过“词形结构”部分。
+            - 如果是**派生词**（含真实前缀/后缀），请说明词根的核心含义。
 
             ---
 
-            3. **词形结构** (ONLY for derived words)
-            - Prefix: (only if it is a real linguistic prefix)
-            - Root: 
-            - Suffix: (only if it is a real linguistic suffix)
+            3. **词形结构**（仅在派生词时输出）
+            - 前缀（Prefix）：（仅当属于标准语言学前缀时才输出）
+            - 词根（Root）：
+            - 后缀（Suffix）：（仅当属于标准语言学后缀时才输出）
 
             ---
 
-            4. **Collocations (常用搭配)**
-            - Provide 2–3 natural English collocations
-            - Each must include a concise Chinese meaning
+            4. **常用搭配（Collocations）**
+            - 列出 2–3 个常见英文搭配
+            - 每个搭配需附带简洁中文释义
 
             ---
 
-            **STRICT RULES (MUST FOLLOW):**
-            - Do NOT invent prefixes or suffixes.
-            - Do NOT treat parts of compound words as affixes.
-            - Do NOT output empty sections.
-            - Do NOT output “无 / None / 没有”.
-            - Keep explanations concise and professional.
-            - All explanations must be in Simplified Chinese.
-            - Keep formatting clean and consistent.
+            【严格规则（必须遵守）】
+            - 不得虚构前缀或后缀
+            - 不得将复合词的组成部分误标为前缀或后缀
+            - 不得输出空内容或占位词（如“无 / 没有 / None”）
+            - 所有解释必须使用简体中文
+            - 输出必须结构清晰、格式统一
+            - 内容保持专业、简洁
             """
         } else {
             return "You are a translation engine. Detect the source language automatically and translate the user text into concise Simplified Chinese. Return translation only."
         }
+    }
+}
+
+enum LookupTextNormalizer {
+    private static let singleEnglishWordPattern = #"^[A-Za-z]+(?:['’-][A-Za-z]+)*$"#
+
+    static func normalize(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isSingleEnglishWord(trimmed) else {
+            return trimmed
+        }
+        return trimmed.lowercased()
+    }
+
+    static func isSingleEnglishWord(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return false
+        }
+        return trimmed.range(
+            of: singleEnglishWordPattern,
+            options: .regularExpression
+        ) != nil
     }
 }
 
@@ -93,7 +118,7 @@ final class TranslationHistoryItem {
     var lookupCount: Int = 1
 
     init(result: TranslationResult) {
-        self.normalizedText = result.originalText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        self.normalizedText = LookupTextNormalizer.normalize(result.originalText)
         self.originalText = result.originalText
         self.translatedText = result.translatedText
         self.providerName = result.providerName

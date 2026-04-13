@@ -7,6 +7,7 @@ final class SettingsStore: ObservableObject {
     @Published var triggerMode: TriggerMode
     @Published var ocrEnabled: Bool
     @Published var minimumEnglishRatio: Double
+    @Published var translationCacheEnabled: Bool
 
     private let defaults: UserDefaults
     private let service = "top.mrlb.TranslatePop"
@@ -20,6 +21,7 @@ final class SettingsStore: ObservableObject {
         let storedHeaders = defaults.string(forKey: "customHeaders") ?? ""
         let storedTimeout = defaults.object(forKey: "timeoutSeconds") as? Double ?? 20
         let storedEnglishRatio = defaults.object(forKey: "minimumEnglishRatio") as? Double ?? 0.35
+        let storedTranslationCacheEnabled = defaults.object(forKey: "translationCacheEnabled") as? Bool ?? true
         let storedApiKey = KeychainHelper.read(service: service, account: "apiKey")
         self.providerConfiguration = ProviderConfiguration(
             providerName: storedProviderName,
@@ -34,6 +36,7 @@ final class SettingsStore: ObservableObject {
         self.triggerMode = storedTriggerMode
         self.ocrEnabled = defaults.object(forKey: "ocrEnabled") as? Bool ?? true
         self.minimumEnglishRatio = storedEnglishRatio
+        self.translationCacheEnabled = storedTranslationCacheEnabled
     }
 
     func save() {
@@ -46,6 +49,7 @@ final class SettingsStore: ObservableObject {
         defaults.set(triggerMode.rawValue, forKey: "triggerMode")
         defaults.set(ocrEnabled, forKey: "ocrEnabled")
         defaults.set(minimumEnglishRatio, forKey: "minimumEnglishRatio")
+        defaults.set(translationCacheEnabled, forKey: "translationCacheEnabled")
         KeychainHelper.save(service: service, account: "apiKey", value: providerConfiguration.apiKey)
     }
 }

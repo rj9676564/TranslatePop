@@ -326,6 +326,8 @@ final class AppCoordinator: ObservableObject {
                 method: .ocr,
                 anchor: location
             )
+//            Generate
+//            generate
             latestStatus = error.localizedDescription
             DebugLogger.app.error("手动 OCR 失败：\(error.localizedDescription, privacy: .public)")
         }
@@ -345,11 +347,20 @@ final class AppCoordinator: ObservableObject {
     }
 
     private func consumeTranslationStream(for selection: CapturedSelection) async throws -> TranslationResult {
+        let request = TranslationRequest(text: selection.text)
+        let lookupText = request.normalizedLookupText
+
+        if settingsStore.translationCacheEnabled,
+           let cachedResult = TranslationStore.shared.get(for: lookupText) {
+            DebugLogger.app.info("命中翻译缓存")
+            return cachedResult
+        }
+
         let service = makeTranslationService()
         var latestPartialText = ""
         var providerName = settingsStore.providerConfiguration.providerName
 
-        for try await update in service.translateStream(.init(text: selection.text)) {
+        for try await update in service.translateStream(.init(text: lookupText)) {
             latestPartialText = update.text
             providerName = update.providerName
             popupPresenter.presentStreaming(
@@ -364,12 +375,19 @@ final class AppCoordinator: ObservableObject {
             throw TranslationFailure.emptyTranslation
         }
 
-        return TranslationResult(
+        let result = TranslationResult(
             originalText: selection.text,
             translatedText: finalText,
             detectedSourceLanguage: nil,
             providerName: providerName
         )
+
+        if settingsStore.translationCacheEnabled {
+            TranslationStore.shared.save(result)
+            DebugLogger.app.info("已写入翻译缓存")
+        }
+
+        return result
     }
 
     private func shouldSuppressAutomaticPopup(for error: Error) -> Bool {

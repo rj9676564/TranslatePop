@@ -80,6 +80,18 @@ struct TranslatePopTests {
     }
 
     @Test
+    func lookupTextNormalizerLowercasesSingleEnglishWord() {
+        #expect(LookupTextNormalizer.normalize("Suffix") == "suffix")
+        #expect(LookupTextNormalizer.normalize("  Suffix  ") == "suffix")
+    }
+
+    @Test
+    func lookupTextNormalizerPreservesSentenceCase() {
+        #expect(LookupTextNormalizer.normalize("Hello world") == "Hello world")
+        #expect(LookupTextNormalizer.normalize("OpenAI API") == "OpenAI API")
+    }
+
+    @Test
     func providerConfigurationFallsBackToSuggestedModelWhenEmpty() {
         let zhipuConfiguration = ProviderConfiguration(
             providerName: "Zhipu",

@@ -120,6 +120,11 @@ struct SettingsRootView: View {
             }
 
             Section("调试") {
+                Toggle("启用翻译缓存", isOn: translationCacheEnabledBinding)
+                Text("开启后会优先复用本地缓存的译文，减少重复请求；关闭后每次都会重新调用翻译接口。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
                 Button(isTesting ? "测试中..." : "测试翻译接口连通性") {
                     isTesting = true
                     Task {
@@ -163,6 +168,16 @@ struct SettingsRootView: View {
         Binding(
             get: { coordinator.settingsStore.minimumEnglishRatio },
             set: { coordinator.settingsStore.minimumEnglishRatio = $0 }
+        )
+    }
+
+    private var translationCacheEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { coordinator.settingsStore.translationCacheEnabled },
+            set: {
+                coordinator.settingsStore.translationCacheEnabled = $0
+                coordinator.settingsStore.save()
+            }
         )
     }
 

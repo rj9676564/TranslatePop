@@ -74,6 +74,30 @@ struct SettingsRootView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("提示词") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("单词提示词")
+                        .font(.headline)
+                    TextEditor(text: promptBinding(\.wordPrompt))
+                        .frame(minHeight: 220)
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.2)))
+                    Text("当选中内容被识别为单个英文单词时，会使用这套提示词。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("句子 / 短语提示词")
+                        .font(.headline)
+                    TextEditor(text: promptBinding(\.sentencePrompt))
+                        .frame(minHeight: 120)
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.2)))
+                    Text("当选中内容包含空格或被识别为短语、句子时，会使用这套提示词。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Section("权限与回退") {
                 Text("TranslatePop 只在你双击取词或拖选文本时工作，不会持续读取你的屏幕内容。")
                     .font(.footnote)
@@ -144,9 +168,33 @@ struct SettingsRootView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(20)
+        .formStyle(.grouped)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             coordinator.refreshPermissions()
+        }
+        .onDisappear {
+            coordinator.settingsStore.save()
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 0) {
+                Divider()
+                HStack(spacing: 12) {
+                    Text("修改完成后可以手动保存，关闭窗口时也会自动保存一次。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    Spacer()
+
+                    Button("保存设置") {
+                        coordinator.saveSettings()
+                    }
+                    .keyboardShortcut("s", modifiers: [.command])
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+                .background(.regularMaterial)
+            }
         }
     }
 
@@ -161,6 +209,13 @@ struct SettingsRootView: View {
         Binding(
             get: { coordinator.settingsStore.providerConfiguration.timeoutSeconds },
             set: { coordinator.settingsStore.providerConfiguration.timeoutSeconds = $0 }
+        )
+    }
+
+    private func promptBinding(_ keyPath: WritableKeyPath<PromptConfiguration, String>) -> Binding<String> {
+        Binding(
+            get: { coordinator.settingsStore.promptConfiguration[keyPath: keyPath] },
+            set: { coordinator.settingsStore.promptConfiguration[keyPath: keyPath] = $0 }
         )
     }
 

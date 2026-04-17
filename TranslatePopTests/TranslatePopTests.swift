@@ -92,6 +92,20 @@ struct TranslatePopTests {
     }
 
     @Test
+    func translationRequestUsesWordAndSentencePromptConfiguration() {
+        let prompts = PromptConfiguration(
+            wordPrompt: "WORD_PROMPT",
+            sentencePrompt: "SENTENCE_PROMPT"
+        )
+
+        let wordRequest = TranslationRequest(text: "Suffix", promptConfiguration: prompts)
+        let sentenceRequest = TranslationRequest(text: "Hello world", promptConfiguration: prompts)
+
+        #expect(wordRequest.systemPrompt == "WORD_PROMPT")
+        #expect(sentenceRequest.systemPrompt == "SENTENCE_PROMPT")
+    }
+
+    @Test
     func providerConfigurationFallsBackToSuggestedModelWhenEmpty() {
         let zhipuConfiguration = ProviderConfiguration(
             providerName: "Zhipu",

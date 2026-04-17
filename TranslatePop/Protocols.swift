@@ -13,7 +13,7 @@ protocol SelectionCaptureStrategy: Sendable {
 protocol Translating: Sendable {
     func translate(_ request: TranslationRequest) async throws -> TranslationResult
     func translateStream(_ request: TranslationRequest) -> AsyncThrowingStream<TranslationStreamUpdate, Error>
-    func testConnection() async throws
+    func testConnection(promptConfiguration: PromptConfiguration) async throws
 }
 
 protocol TranslationProviderAdapting: Sendable {

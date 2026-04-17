@@ -4,6 +4,7 @@ import Foundation
 @MainActor
 final class SettingsStore: ObservableObject {
     @Published var providerConfiguration: ProviderConfiguration
+    @Published var promptConfiguration: PromptConfiguration
     @Published var triggerMode: TriggerMode
     @Published var ocrEnabled: Bool
     @Published var minimumEnglishRatio: Double
@@ -22,6 +23,8 @@ final class SettingsStore: ObservableObject {
         let storedTimeout = defaults.object(forKey: "timeoutSeconds") as? Double ?? 20
         let storedEnglishRatio = defaults.object(forKey: "minimumEnglishRatio") as? Double ?? 0.35
         let storedTranslationCacheEnabled = defaults.object(forKey: "translationCacheEnabled") as? Bool ?? true
+        let storedWordPrompt = defaults.string(forKey: "wordPrompt") ?? PromptConfiguration.defaultWordPrompt
+        let storedSentencePrompt = defaults.string(forKey: "sentencePrompt") ?? PromptConfiguration.defaultSentencePrompt
         let storedApiKey = KeychainHelper.read(service: service, account: "apiKey")
         self.providerConfiguration = ProviderConfiguration(
             providerName: storedProviderName,
@@ -31,6 +34,10 @@ final class SettingsStore: ObservableObject {
             model: storedModel,
             timeoutSeconds: storedTimeout,
             customHeaders: storedHeaders
+        )
+        self.promptConfiguration = PromptConfiguration(
+            wordPrompt: storedWordPrompt,
+            sentencePrompt: storedSentencePrompt
         )
         let storedTriggerMode = TriggerMode(rawValue: defaults.string(forKey: "triggerMode") ?? "") ?? .automatic
         self.triggerMode = storedTriggerMode
@@ -46,6 +53,8 @@ final class SettingsStore: ObservableObject {
         defaults.set(providerConfiguration.model, forKey: "model")
         defaults.set(providerConfiguration.timeoutSeconds, forKey: "timeoutSeconds")
         defaults.set(providerConfiguration.customHeaders, forKey: "customHeaders")
+        defaults.set(promptConfiguration.wordPrompt, forKey: "wordPrompt")
+        defaults.set(promptConfiguration.sentencePrompt, forKey: "sentencePrompt")
         defaults.set(triggerMode.rawValue, forKey: "triggerMode")
         defaults.set(ocrEnabled, forKey: "ocrEnabled")
         defaults.set(minimumEnglishRatio, forKey: "minimumEnglishRatio")

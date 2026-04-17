@@ -108,7 +108,7 @@ final class AppCoordinator: ObservableObject {
     func testTranslationConnection() async {
         settingsStore.save()
         do {
-            try await makeTranslationService().testConnection()
+            try await makeTranslationService().testConnection(promptConfiguration: settingsStore.promptConfiguration)
             latestStatus = "接口连通成功"
         } catch {
             latestStatus = error.localizedDescription
@@ -126,7 +126,7 @@ final class AppCoordinator: ObservableObject {
 
     func toggleMonitoring() {
         isMonitoring.toggle()
-        latestStatus = isMonitoring ? "已恢复监听" : "已暂停监听"
+        latestStatus = monitoringStatusText
     }
 
     func triggerManualOCR() {
@@ -141,7 +141,7 @@ final class AppCoordinator: ObservableObject {
         isMonitoring = true
 
         globalMouseDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
-            guard let self, self.isMonitoring else { return }
+            guard let self, self.shouldObserveGlobalPointerEvents else { return }
             self.activeTranslationTask?.cancel()
             self.mouseDownTime = Date()
             self.popupPresenter.dismissForUserInteraction(at: NSEvent.mouseLocation)
@@ -152,13 +152,13 @@ final class AppCoordinator: ObservableObject {
         }
 
         globalSecondaryMouseDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.rightMouseDown, .otherMouseDown]) { [weak self] _ in
-            guard let self, self.isMonitoring else { return }
+            guard let self, self.shouldObserveGlobalPointerEvents else { return }
             self.activeTranslationTask?.cancel()
             self.popupPresenter.dismissForUserInteraction(at: NSEvent.mouseLocation)
         }
 
         globalKeyDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
-            guard let self, self.isMonitoring else { return }
+            guard let self, self.shouldObserveGlobalKeyEvents else { return }
             let chars = event.charactersIgnoringModifiers?.lowercased()
 
             // 仅记录用户真实复制/剪切时间，用于后续剪贴板回退策略判断。
@@ -169,12 +169,12 @@ final class AppCoordinator: ObservableObject {
         }
 
         globalMouseDraggedMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDragged]) { [weak self] _ in
-            guard let self, self.isMonitoring else { return }
+            guard let self, self.shouldObserveGlobalPointerEvents else { return }
             self.isLeftMouseDragging = true
         }
 
         globalMouseUpMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp]) { [weak self] _ in
-            guard let self, self.isMonitoring else { return }
+            guard let self, self.shouldObserveGlobalPointerEvents else { return }
             guard self.isLeftMouseDragging else { return }
             self.isLeftMouseDragging = false
             self.scheduleTrigger(.dragSelection, location: NSEvent.mouseLocation)
@@ -235,7 +235,7 @@ final class AppCoordinator: ObservableObject {
                 anchorPoint: selection.anchorPoint,
                 capturedAt: selection.capturedAt
             )
-
+            
             popupPresenter.presentLoading(for: normalizedSelection)
             latestStatus = kind == .doubleClick ? "双击取词成功" : "划词取句成功"
             DebugLogger.app.info("捕获文本成功：method=\(normalizedSelection.method.rawValue, privacy: .public) text=\(limitedText, privacy: .public)")
@@ -347,7 +347,10 @@ final class AppCoordinator: ObservableObject {
     }
 
     private func consumeTranslationStream(for selection: CapturedSelection) async throws -> TranslationResult {
-        let request = TranslationRequest(text: selection.text)
+        let request = TranslationRequest(
+            text: selection.text,
+            promptConfiguration: settingsStore.promptConfiguration
+        )
         let lookupText = request.normalizedLookupText
 
         if settingsStore.translationCacheEnabled,
@@ -360,7 +363,10 @@ final class AppCoordinator: ObservableObject {
         var latestPartialText = ""
         var providerName = settingsStore.providerConfiguration.providerName
 
-        for try await update in service.translateStream(.init(text: lookupText)) {
+        for try await update in service.translateStream(.init(
+            text: lookupText,
+            promptConfiguration: settingsStore.promptConfiguration
+        )) {
             latestPartialText = update.text
             providerName = update.providerName
             popupPresenter.presentStreaming(
@@ -404,5 +410,25 @@ final class AppCoordinator: ObservableObject {
         case .ocrUnavailable:
             return false
         }
+    }
+
+    private var shouldObserveGlobalPointerEvents: Bool {
+        isMonitoring || settingsStore.triggerMode == .modifierKey
+    }
+
+    private var shouldObserveGlobalKeyEvents: Bool {
+        shouldObserveGlobalPointerEvents
+    }
+
+    private var monitoringStatusText: String {
+        guard !isMonitoring else {
+            return "已恢复监听"
+        }
+
+        if settingsStore.triggerMode == .modifierKey {
+            return "已暂停自动监听，可按住 Option 取词"
+        }
+
+        return "已暂停监听"
     }
 }

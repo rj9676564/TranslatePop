@@ -44,8 +44,8 @@ struct TranslationService: Translating {
         return adapter.translateStream(request, configuration: configuration)
     }
 
-    func testConnection() async throws {
-        _ = try await translate(.init(text: "hello world"))
+    func testConnection(promptConfiguration: PromptConfiguration) async throws {
+        _ = try await translate(.init(text: "hello world", promptConfiguration: promptConfiguration))
     }
 }
 
@@ -162,7 +162,8 @@ private extension TranslationProviderAdapting {
                 .init(role: "user", content: request.text)
             ],
             stream: stream,
-            temperature: 0.2
+            temperature: 0.2,
+            enableThinking: false
         )
 
         var urlRequest = URLRequest(url: url)
@@ -363,6 +364,14 @@ private extension TranslationProviderAdapting {
 }
 
 private struct ChatCompletionRequest: Encodable {
+    private enum CodingKeys: String, CodingKey {
+        case model
+        case messages
+        case stream
+        case temperature
+        case enableThinking = "enable_thinking"
+    }
+
     struct Message: Encodable {
         let role: String
         let content: String
@@ -372,6 +381,7 @@ private struct ChatCompletionRequest: Encodable {
     let messages: [Message]
     let stream: Bool
     let temperature: Double
+    let enableThinking: Bool?
 }
 
 private struct ChatCompletionResponse: Decodable {

@@ -8,6 +8,7 @@ final class PopupViewModel: ObservableObject {
     @Published var state: PopupContentState = .idle
     @Published var isHovering = false
     @Published var allowsScrolling = false
+    @Published var panelHeight: CGFloat = 80
 }
 
 @MainActor
@@ -134,12 +135,14 @@ final class PopupPresenter: NSObject, PopupPresenting {
             viewModel.isHovering = false
         }
         let clampedPanelFrame = clampedFrame(panelFrame, visibleFrame: visibleFrame)
+        viewModel.panelHeight = clampedPanelFrame.height
         panel.setFrame(clampedPanelFrame, display: true)
         if !panel.isVisible {
             panel.orderFrontRegardless()
         }
         activeAnchor = anchor
         logger.info("弹窗已显示，x=\(clampedPanelFrame.origin.x, format: .fixed(precision: 0)) y=\(clampedPanelFrame.origin.y, format: .fixed(precision: 0))")
+        logger.info("弹窗已显示，width=\(clampedPanelFrame.width, format: .fixed(precision: 0)) height=\(clampedPanelFrame.height, format: .fixed(precision: 0))")
     }
 
     private func makePanel() -> NSPanel {
@@ -224,8 +227,8 @@ final class PopupPresenter: NSObject, PopupPresenting {
             totalHeight += measuredHeight(
                 for: partialText,
                 width: textWidth,
-                font: .systemFont(ofSize: 15, weight: .semibold),
-                lineSpacing: 4
+                font: .systemFont(ofSize: 13, weight: .regular),
+                lineSpacing: 2
             )
             totalHeight += 26
         case .result(_, let result):
@@ -233,8 +236,8 @@ final class PopupPresenter: NSObject, PopupPresenting {
             totalHeight += measuredHeight(
                 for: result.translatedText,
                 width: textWidth,
-                font: .systemFont(ofSize: 15, weight: .semibold),
-                lineSpacing: 4
+                font: .systemFont(ofSize: 13, weight: .regular),
+                lineSpacing: 2
             )
             totalHeight += 26
         case .error(let message, _, _):
@@ -304,20 +307,14 @@ final class PopupPresenter: NSObject, PopupPresenting {
         if let activeTopOrigin {
             return activeTopOrigin
         }
-        
+
         let margin: CGFloat = 12
-        // X轴：窗口最左侧在鼠标之后 50 像素（如果右侧空间不够，系统则会自动靠齐屏幕右侧边缘防飞出）
         let x = min(
             max(anchor.x + 150, visibleFrame.minX + margin),
             visibleFrame.maxX - panelWidth - margin
         )
-        
-        // Y轴：优先放在鼠标下方稍稍偏移（距离大概20个像素），不遮挡划词的内容
         let preferredTopY = anchor.y - 20
-        
-        // 只限制最高点不要飞出屏幕正上方（最低点不用在这里操心，后续 clampedFrame 遇到屏幕底部会自动把它“向上挤起”）
         let topY = min(preferredTopY, visibleFrame.maxY - margin)
-        
         let point = CGPoint(x: x, y: topY)
         activeTopOrigin = point
         return point
@@ -347,10 +344,10 @@ final class PopupPresenter: NSObject, PopupPresenting {
             return nil
         case .loading(let text, _):
             return text
-        case .streaming(let selection, _, _):
-            return selection.text
-        case .result(let selection, _):
-            return selection.text
+        case .streaming:
+            return nil
+        case .result:
+            return nil
         case .error(_, let text, _):
             return text
         case .idle:
@@ -370,11 +367,8 @@ private struct PopupCardView: View {
     let onClose: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            contentCard
-            Spacer(minLength: 0)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        contentCard
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         .onHover { hovering in
             onHoverChanged(hovering)
         }
@@ -397,6 +391,7 @@ private struct PopupCardView: View {
                     ScrollView {
                         scrollContent
                     }
+                    .frame(maxHeight: .infinity, alignment: .top)
                     .onChange(of: scrollResetKey) { _, _ in
                         proxy.scrollTo("top", anchor: .top)
                     }
@@ -410,6 +405,7 @@ private struct PopupCardView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(height: viewModel.panelHeight, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(.ultraThinMaterial)
@@ -543,10 +539,10 @@ private struct PopupCardView: View {
             return nil
         case .loading(let text, _):
             return text
-        case .streaming(let selection, _, _):
-            return selection.text
-        case .result(let selection, _):
-            return selection.text
+        case .streaming:
+            return nil
+        case .result:
+            return nil
         case .error(_, let text, _):
             return text
         case .idle:

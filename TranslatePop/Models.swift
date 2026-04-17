@@ -19,59 +19,73 @@ struct TranslationRequest: Equatable, Sendable {
     var text: String
     var sourceLanguage: String?
     var targetLanguage: String = "zh-Hans"
+    var promptConfiguration: PromptConfiguration = .default
 
     var normalizedLookupText: String {
         LookupTextNormalizer.normalize(text)
     }
     
     var systemPrompt: String {
-        let isWord = LookupTextNormalizer.isSingleEnglishWord(text)
-        if isWord {
-            return """
-            你是一位专业的词典与词源学专家。
+        promptConfiguration.systemPrompt(for: text)
+    }
+}
 
-            请针对给定单词，严格按照以下结构输出内容：
+struct PromptConfiguration: Equatable, Codable, Sendable {
+    static let defaultWordPrompt = """
+    你是一位专业的词典与词源学专家。
 
-            ---
+    请针对给定单词，严格按照以下结构输出内容：
 
-            1. **Result**
-            - 直接给出该单词的中文核心释义（使用**加粗**）。
-            - 保持简洁、准确，不要添加多余解释。
+    ---
 
-            ---
+    1. **Result**
+    - 直接给出该单词的中文核心释义（使用**加粗**）。
+    - 保持简洁、准确，不要添加多余解释。
 
-            2. **词源解析（Etymology）**
-            - 说明该词的来源语言（如拉丁语、希腊语、古英语等）及其演变过程。
-            - 如果是**复合词**（如 however、into），请说明各部分单词如何组合形成该词。
-              → 此情况下必须跳过“词形结构”部分。
-            - 如果是**派生词**（含真实前缀/后缀），请说明词根的核心含义。
+    ---
 
-            ---
+    2. **词源解析（Etymology）**
+    - 说明该词的来源语言（如拉丁语、希腊语、古英语等）及其演变过程。
+    - 如果是**复合词**（如 however、into），请说明各部分单词如何组合形成该词。
+      → 此情况下必须跳过“词形结构”部分。
+    - 如果是**派生词**（含真实前缀/后缀），请说明词根的核心含义。
 
-            3. **词形结构**（仅在派生词时输出）
-            - 前缀（Prefix）：（仅当属于标准语言学前缀时才输出）
-            - 词根（Root）：
-            - 后缀（Suffix）：（仅当属于标准语言学后缀时才输出）
+    ---
 
-            ---
+    3. **词形结构**（仅在派生词时输出）
+    - 前缀（Prefix）：（仅当属于标准语言学前缀时才输出）
+    - 词根（Root）：
+    - 后缀（Suffix）：（仅当属于标准语言学后缀时才输出）
 
-            4. **常用搭配（Collocations）**
-            - 列出 2–3 个常见英文搭配
-            - 每个搭配需附带简洁中文释义
+    ---
 
-            ---
+    4. **常用搭配（Collocations）**
+    - 列出 2–3 个常见英文搭配
+    - 每个搭配需附带简洁中文释义
 
-            【严格规则（必须遵守）】
-            - 不得虚构前缀或后缀
-            - 不得将复合词的组成部分误标为前缀或后缀
-            - 不得输出空内容或占位词（如“无 / 没有 / None”）
-            - 所有解释必须使用简体中文
-            - 输出必须结构清晰、格式统一
-            - 内容保持专业、简洁
-            """
-        } else {
-            return "You are a translation engine. Detect the source language automatically and translate the user text into concise Simplified Chinese. Return translation only."
+    ---
+
+    【严格规则（必须遵守）】
+    - 不得虚构前缀或后缀
+    - 不得将复合词的组成部分误标为前缀或后缀
+    - 不得输出空内容或占位词（如“无 / 没有 / None”）
+    - 所有解释必须使用简体中文
+    - 输出必须结构清晰、格式统一
+    - 内容保持专业、简洁
+    """
+
+    static let defaultSentencePrompt = "You are a translation engine. Detect the source language automatically and translate the user text into concise Simplified Chinese. Return translation only."
+
+    static let `default` = PromptConfiguration()
+
+    var wordPrompt: String = PromptConfiguration.defaultWordPrompt
+    var sentencePrompt: String = PromptConfiguration.defaultSentencePrompt
+
+    func systemPrompt(for text: String) -> String {
+        if LookupTextNormalizer.isSingleEnglishWord(text) {
+            return wordPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         }
+        return sentencePrompt.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
